@@ -24,11 +24,14 @@ private:
 private:
   std::any visitAsmProgram(std::shared_ptr<AsmProgram> Asm) override;
   std::any visitAsmFunction(std::shared_ptr<AsmFunction> Asm) override;
-  std::any visitAsmBinaryInst(std::shared_ptr<AsmBinaryInst> Asm) override;
+  std::any visitAsmUnary(std::shared_ptr<AsmUnary> Asm) override;
   std::any visitAsmMov(std::shared_ptr<AsmMov> Asm) override;
-  std::any visitAsmImm(std::shared_ptr<AsmImm> Asm) override;
+  std::any visitAsmAllocateStack(std::shared_ptr<AsmAllocateStack> Asm) override;
   std::any visitAsmReturn(std::shared_ptr<AsmReturn> Asm) override;
+  std::any visitAsmImm(std::shared_ptr<AsmImm> Asm) override;
   std::any visitAsmRegister(std::shared_ptr<AsmRegister> Asm) override;
+  std::any visitAsmPseudo(std::shared_ptr<AsmPseudo> Asm) override;
+  std::any visitAsmStack(std::shared_ptr<AsmStack> Asm) override;
 };
 }
 

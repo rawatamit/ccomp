@@ -1,0 +1,112 @@
+#ifndef Tacky_H_
+#define Tacky_H_
+
+#include "Token.h"
+#include <memory>
+#include <any>
+#include <vector>
+namespace ccomp {
+class Tacky;
+class TackyProgram;
+class TackyFunction;
+class TackyUnary;
+class TackyConstant;
+class TackyVar;
+class TackyReturn;
+class Expr;
+
+class TackyVisitor {
+public:
+  virtual ~TackyVisitor() {}
+  virtual std::any     visitTackyProgram     (std::shared_ptr<TackyProgram     > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyFunction    (std::shared_ptr<TackyFunction    > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyUnary  (std::shared_ptr<TackyUnary  > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyConstant (std::shared_ptr<TackyConstant > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyVar (std::shared_ptr<TackyVar > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyReturn (std::shared_ptr<TackyReturn > Tacky __attribute_maybe_unused__) { return nullptr; }
+};
+
+class Tacky {
+public:
+  virtual ~Tacky() {}
+  virtual std::any accept(TackyVisitor& visitor) = 0;
+};
+
+class TackyProgram      : public std::enable_shared_from_this<TackyProgram     >, public Tacky { 
+public: 
+  TackyProgram     (   std::vector<std::shared_ptr<Tacky>> functions)  :
+    functions(functions) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyProgram     > p{shared_from_this()};
+    return visitor.visitTackyProgram     (p);
+  }
+public: 
+   std::vector<std::shared_ptr<Tacky>> functions;
+};
+
+class TackyFunction     : public std::enable_shared_from_this<TackyFunction    >, public Tacky { 
+public: 
+  TackyFunction    (   Token name,    std::vector<std::shared_ptr<Tacky>> instructions)  :
+    name(name), instructions(instructions) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyFunction    > p{shared_from_this()};
+    return visitor.visitTackyFunction    (p);
+  }
+public: 
+   Token name;
+   std::vector<std::shared_ptr<Tacky>> instructions;
+};
+
+class TackyUnary   : public std::enable_shared_from_this<TackyUnary  >, public Tacky { 
+public: 
+  TackyUnary  (   Token op,    std::shared_ptr<Tacky> src,    std::shared_ptr<Tacky> dest)  :
+    op(op), src(src), dest(dest) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyUnary  > p{shared_from_this()};
+    return visitor.visitTackyUnary  (p);
+  }
+public: 
+   Token op;
+   std::shared_ptr<Tacky> src;
+   std::shared_ptr<Tacky> dest;
+};
+
+class TackyConstant  : public std::enable_shared_from_this<TackyConstant >, public Tacky { 
+public: 
+  TackyConstant (   int value)  :
+    value(value) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyConstant > p{shared_from_this()};
+    return visitor.visitTackyConstant (p);
+  }
+public: 
+   int value;
+};
+
+class TackyVar  : public std::enable_shared_from_this<TackyVar >, public Tacky { 
+public: 
+  TackyVar (   std::string identifier)  :
+    identifier(identifier) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyVar > p{shared_from_this()};
+    return visitor.visitTackyVar (p);
+  }
+public: 
+   std::string identifier;
+};
+
+class TackyReturn  : public std::enable_shared_from_this<TackyReturn >, public Tacky { 
+public: 
+  TackyReturn (   std::shared_ptr<Tacky> value)  :
+    value(value) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyReturn > p{shared_from_this()};
+    return visitor.visitTackyReturn (p);
+  }
+public: 
+   std::shared_ptr<Tacky> value;
+};
+
+} // end namespace
+
+#endif

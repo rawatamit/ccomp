@@ -18,12 +18,12 @@ class Expr;
 class ExprVisitor {
 public:
   virtual ~ExprVisitor() {}
-  virtual std::any     visitAssign       (std::shared_ptr<Assign       > Expr) = 0;
-  virtual std::any     visitBinaryExpr   (std::shared_ptr<BinaryExpr   > Expr) = 0;
-  virtual std::any     visitLiteralExpr (std::shared_ptr<LiteralExpr > Expr) = 0;
-  virtual std::any     visitLogical  (std::shared_ptr<Logical  > Expr) = 0;
-  virtual std::any     visitUnaryExpr    (std::shared_ptr<UnaryExpr    > Expr) = 0;
-  virtual std::any     visitVariable     (std::shared_ptr<Variable     > Expr) = 0;
+  virtual std::any     visitAssign       (std::shared_ptr<Assign       > Expr __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitBinaryExpr   (std::shared_ptr<BinaryExpr   > Expr __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitLiteralExpr (std::shared_ptr<LiteralExpr > Expr __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitLogical  (std::shared_ptr<Logical  > Expr __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitUnaryExpr    (std::shared_ptr<UnaryExpr    > Expr __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitVariable     (std::shared_ptr<Variable     > Expr __attribute_maybe_unused__) { return nullptr; }
 };
 
 class Expr {

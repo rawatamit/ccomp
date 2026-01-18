@@ -12,6 +12,7 @@ add_library(ccomplib
             Scanner.cc
             ErrorHandler.cc
             Parser.cc
+            TackyGen.cc
             AsmGen.cc
             Codegen.cc
             ${AST_GEN_FILES})

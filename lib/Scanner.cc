@@ -68,9 +68,6 @@ void Scanner::scanAndAddToken() {
   case '.':
     addToken(TokenType::DOT);
     break;
-  case '-':
-    addToken(TokenType::MINUS);
-    break;
   case '+':
     addToken(TokenType::PLUS);
     break;
@@ -82,6 +79,9 @@ void Scanner::scanAndAddToken() {
     break;
   case '~':
     addToken(TokenType::TILDE);
+    break;
+  case '-':
+    addToken(matchAndAdvance('-') ? TokenType::MINUS_MINUS : TokenType::MINUS);
     break;
   case '!':
     addToken(matchAndAdvance('=') ? TokenType::BANG_EQUAL : TokenType::BANG);

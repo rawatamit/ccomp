@@ -20,14 +20,14 @@ class Expr;
 class StmtVisitor {
 public:
   virtual ~StmtVisitor() {}
-  virtual std::any     visitBlock      (std::shared_ptr<Block      > Stmt) = 0;
-  virtual std::any     visitExpression (std::shared_ptr<Expression > Stmt) = 0;
-  virtual std::any     visitFunction   (std::shared_ptr<Function   > Stmt) = 0;
-  virtual std::any     visitIf         (std::shared_ptr<If         > Stmt) = 0;
-  virtual std::any     visitPrint      (std::shared_ptr<Print      > Stmt) = 0;
-  virtual std::any     visitReturn     (std::shared_ptr<Return     > Stmt) = 0;
-  virtual std::any     visitWhile      (std::shared_ptr<While      > Stmt) = 0;
-  virtual std::any     visitVar        (std::shared_ptr<Var        > Stmt) = 0;
+  virtual std::any     visitBlock      (std::shared_ptr<Block      > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitExpression (std::shared_ptr<Expression > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitFunction   (std::shared_ptr<Function   > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitIf         (std::shared_ptr<If         > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitPrint      (std::shared_ptr<Print      > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitReturn     (std::shared_ptr<Return     > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitWhile      (std::shared_ptr<While      > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitVar        (std::shared_ptr<Var        > Stmt __attribute_maybe_unused__) { return nullptr; }
 };
 
 class Stmt {

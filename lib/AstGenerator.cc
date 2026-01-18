@@ -2,8 +2,6 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <sys/cdefs.h>
-#include <utility>
 #include <vector>
 
 namespace ccomp {
@@ -160,7 +158,7 @@ public:
       auto className = type.substr(0, type.find(":"));
       file << "  virtual std::any "
            << "    visit" + className << "(std::shared_ptr<" << className
-           << "> " << baseName << ") = 0;" << std::endl;
+           << "> " << baseName << " __attribute_maybe_unused__) { return nullptr; }" << std::endl;
     }
     file << "};" << std::endl;
   }
@@ -181,16 +179,9 @@ int main(int argc, char **argv) {
         {"Assign       :Token name, std::shared_ptr<Expr> value",
          "BinaryExpr   :std::shared_ptr<Expr> left, Token Operator, "
          "std::shared_ptr<Expr> right",
-         //"Call     : std::shared_ptr<Expr> callee, Token paren, "
-         //"std::vector<std::shared_ptr<Expr>> args",
-         //"Get      : std::shared_ptr<Expr> object, Token name",
-         //"GroupingExpr : std::shared_ptr<Expr> expression",
          "LiteralExpr : TokenType type, std::string value",
          "Logical  : std::shared_ptr<Expr> left, Token Operator, "
          "std::shared_ptr<Expr> right",
-         //"Set      : std::shared_ptr<Expr> object, Token name, "
-         //"std::shared_ptr<Expr> value",
-         //"This     : Token keyword", "Super    : Token keyword, Token method",
          "UnaryExpr    :Token Operator, std::shared_ptr<Expr> right",
          "Variable     :Token name"},
         {{"CObject", "accept", "ExprVisitor"}}};
@@ -216,16 +207,31 @@ int main(int argc, char **argv) {
     AstGen stmtGenerator(outDir, stmtSpec);
     stmtGenerator.generate();
 
+    const AstSpecification tackySpec = {
+        "Tacky",
+        {"TackyProgram     : std::vector<std::shared_ptr<Tacky>> functions",
+            "TackyFunction    : Token name, std::vector<std::shared_ptr<Tacky>> instructions",
+            "TackyUnary  : Token op, std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest",
+            "TackyConstant : int value",
+            "TackyVar : std::string identifier",
+            "TackyReturn : std::shared_ptr<Tacky> value",
+        },
+        {{"Tacky", "accept", "TackyVisitor"}}};
+    AstGen tackyGenerator(outDir, tackySpec);
+    tackyGenerator.generate();
+
     const AstSpecification asmSpec = {
         "Asm",
         {"AsmProgram     : std::vector<std::shared_ptr<Asm>> functions",
             "AsmFunction    : Token name, std::vector<std::shared_ptr<Asm>> instructions",
-            "AsmBinaryInst  : Token op, "
-            "std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest",
-            "AsmMov : std::vector<std::shared_ptr<Asm>> src, std::shared_ptr<Asm> dest",
-            "AsmImm : TokenType type, std::string operand",
+            "AsmUnary  : Token op, std::shared_ptr<Asm> operand",
+            "AsmMov : std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest",
+            "AsmAllocateStack : int size",
             "AsmReturn : int dummy",
-            "AsmRegister : int dummy",
+            "AsmImm : int value",
+            "AsmRegister : int reg",
+            "AsmPseudo : std::string identifier",
+            "AsmStack : int offset",
         },
         {{"Asm", "accept", "AsmVisitor"}}};
     AstGen asmGenerator(outDir, asmSpec);

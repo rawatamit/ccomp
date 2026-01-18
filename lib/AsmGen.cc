@@ -1,139 +1,186 @@
 #include "AsmGen.h"
 #include "Token.h"
 #include "ast/Asm.h"
+#include <algorithm>
 #include <any>
 #include <cassert>
+#include <iterator>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 using namespace ccomp;
 
-AsmGen::AsmGen(const std::vector<std::shared_ptr<Stmt>>& stmts, ErrorHandler &errorHandler) :
-  stmts_(stmts), errorHandler_(errorHandler)
+AsmGen::AsmGen(std::shared_ptr<Tacky> tackycode, ErrorHandler& errorHandler) :
+  tackycode_(tackycode), errorHandler_(errorHandler)
 {}
 
 std::shared_ptr<Asm> AsmGen::gen() {
-  return std::make_shared<AsmProgram>(gen(stmts_));
+  auto prog = std::any_cast<std::shared_ptr<AsmProgram>>(tackycode_->accept(*this));
+  prog = replace_pseudo_regs(prog);
+  return prog;
 }
 
-std::vector<std::shared_ptr<Asm>> AsmGen::gen(std::shared_ptr<Expr> expr) {
+std::vector<std::shared_ptr<Asm>> AsmGen::gen(std::shared_ptr<Tacky> expr) {
   auto val = expr->accept(*this);
   return std::any_cast<std::vector<std::shared_ptr<Asm>>>(val);
 }
 
-std::vector<std::shared_ptr<Asm>> AsmGen::gen(std::shared_ptr<Stmt> stmt) {
-  auto val = stmt->accept(*this);
-  return std::any_cast<std::vector<std::shared_ptr<Asm>>>(val);
-}
-
-std::vector<std::shared_ptr<Asm>> AsmGen::gen(std::vector<std::shared_ptr<Expr>> exprs) {
+std::vector<std::shared_ptr<Asm>> AsmGen::gen(std::vector<std::shared_ptr<Tacky>> exprs) {
   std::vector<std::shared_ptr<Asm>> genexprs;
   for (auto expr : exprs) {
-    auto genexpr(std::any_cast<std::vector<std::shared_ptr<Asm>>>(gen(expr)));
-    for (auto inst : genexpr) {
-      genexprs.emplace_back(inst);
-    }
+    auto genexpr = gen(expr);
+    std::copy(genexpr.begin(), genexpr.end(), std::back_inserter(genexprs));
   }
   return genexprs;
 }
 
-std::vector<std::shared_ptr<Asm>> AsmGen::gen(std::vector<std::shared_ptr<Stmt>> stmts) {
-  std::vector<std::shared_ptr<Asm>> genstmts;
-  for (auto stmt : stmts) {
-    auto genexpr(std::any_cast<std::vector<std::shared_ptr<Asm>>>(gen(stmt)));
-    for (auto inst : genexpr) {
-      genstmts.emplace_back(inst);
+std::shared_ptr<AsmProgram> AsmGen::replace_pseudo_regs(std::shared_ptr<AsmProgram> prog) {
+  class ReplacePseudo : public AsmVisitor {
+  public:
+    std::shared_ptr<AsmProgram> fix(std::shared_ptr<AsmProgram> prog) {
+      return std::any_cast<std::shared_ptr<AsmProgram>>(visitAsmProgram(prog));
     }
+
+  private:
+    int fn_stack_size_ = 0;
+    std::unordered_map<std::string, int> reg_to_offset_;
+
+    std::vector<std::shared_ptr<Asm>> fix_pseudo(std::shared_ptr<Asm> inst) {
+      return std::any_cast<std::vector<std::shared_ptr<Asm>>>(
+                inst->accept(*this));
+    }
+
+    std::any visitAsmProgram(std::shared_ptr<AsmProgram> prog) {
+      std::vector<std::shared_ptr<Asm>> functions;
+      for (auto fn : prog->functions) {
+          functions.push_back(
+            std::any_cast<std::shared_ptr<AsmFunction>>(fn->accept(*this)));
+      }
+      return std::make_shared<AsmProgram>(functions);
+    }
+
+    std::any visitAsmFunction(std::shared_ptr<AsmFunction> fn) {
+      fn_stack_size_ = 0;
+      std::vector<std::shared_ptr<Asm>> insts;
+      for (auto inst : fn->instructions) {
+        auto fix_insts = fix_pseudo(inst);
+        std::copy(fix_insts.begin(), fix_insts.end(), std::back_inserter(insts));
+      }
+      insts.emplace(insts.begin(),
+                    std::make_shared<AsmAllocateStack>(fn_stack_size_));
+      return std::make_shared<AsmFunction>(fn->name, insts);
+    }
+
+    std::any visitAsmUnary(std::shared_ptr<AsmUnary> unary) {
+      // shouldn't be anything other than a single instruction
+      auto operand = fix_pseudo(unary->operand).back();
+      return std::vector<std::shared_ptr<Asm>>{
+        std::make_shared<AsmUnary>(unary->op, operand)};
+    }
+
+    std::any visitAsmMov(std::shared_ptr<AsmMov> mov) {
+      auto src = fix_pseudo(mov->src).back();
+      auto dest = fix_pseudo(mov->dest).back();
+
+      if (std::dynamic_pointer_cast<AsmStack>(src) &&
+          std::dynamic_pointer_cast<AsmStack>(dest)) {
+        auto reg = std::make_shared<AsmRegister>(10);
+        return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmMov>(src, reg),
+          std::make_shared<AsmMov>(reg, dest)};
+      }
+
+      return std::vector<std::shared_ptr<Asm>>{
+        std::make_shared<AsmMov>(src, dest)};
+    }
+
+    std::any visitAsmAllocateStack(std::shared_ptr<AsmAllocateStack>) {
+      assert(0);
+      return nullptr;
+    }
+
+    std::any visitAsmReturn(std::shared_ptr<AsmReturn> ret) {
+      return std::vector<std::shared_ptr<Asm>>{ret};
+    }
+
+    std::any visitAsmImm(std::shared_ptr<AsmImm> imm) {
+      return std::vector<std::shared_ptr<Asm>>{imm};
+    }
+
+    std::any visitAsmRegister(std::shared_ptr<AsmRegister> reg) {
+      return std::vector<std::shared_ptr<Asm>>{reg};
+    }
+
+    std::any visitAsmPseudo(std::shared_ptr<AsmPseudo> pseudo) {
+      // TODO: only integers for now
+      int stack_offset = INT_MIN;
+      auto it = reg_to_offset_.find(pseudo->identifier);
+      if (it == reg_to_offset_.end()) {
+        fn_stack_size_ += 4;
+        stack_offset = fn_stack_size_;
+        reg_to_offset_[pseudo->identifier] = stack_offset;
+      } else {
+        stack_offset = it->second;
+      }
+
+      return std::vector<std::shared_ptr<Asm>>{
+        std::make_shared<AsmStack>(stack_offset)};
+    }
+
+    std::any visitAsmStack(std::shared_ptr<AsmStack>) {
+      assert(0);
+      return nullptr;
+    }
+  };
+
+  ReplacePseudo repl_pseudo;
+  return repl_pseudo.fix(prog);
+}
+
+std::any AsmGen::visitTackyProgram(std::shared_ptr<TackyProgram> prog) {
+  std::vector<std::shared_ptr<Asm>> fns;
+  for (auto fn : prog->functions) {
+    auto fnp = std::any_cast<std::shared_ptr<AsmFunction>>(fn->accept(*this));
+    fns.push_back(fnp);
   }
-  return genstmts;
+  return std::make_shared<AsmProgram>(fns);
 }
 
-std::any AsmGen::visitBlock(std::shared_ptr<Block> stmt) {
-  return gen(stmt->stmts);
-  // return parenthesizeS("block", stmt->stmts);
-}
-
-std::any AsmGen::visitExpression(std::shared_ptr<Expression> stmt) {
-  return gen(stmt->expr);
-}
-
-std::any AsmGen::visitFunction(std::shared_ptr<Function> fn) {
-  // for (auto p : stmt->params)
+std::any AsmGen::visitTackyFunction(std::shared_ptr<TackyFunction> fn) {
   std::vector<std::shared_ptr<Asm>> insts;
-  for (auto p : fn->body) {
-    std::vector<std::shared_ptr<Asm>> asmcode =
-      (std::any_cast<std::vector<std::shared_ptr<Asm>>>(gen(p)));
-    for (auto inst: asmcode) {
-      insts.emplace_back(inst);
-    }
+  for (auto p : fn->instructions) {
+    auto geninsts = gen(p);
+    std::copy(geninsts.begin(), geninsts.end(), std::back_inserter(insts));
   }
 
-  return std::vector<std::shared_ptr<Asm>>(
-    {std::make_shared<AsmFunction>(fn->name, insts)});
-  //return stmt->body;
+  return std::make_shared<AsmFunction>(fn->name, insts);
 }
 
-std::any AsmGen::visitIf(std::shared_ptr<If> stmt) {
-  printf("(if ");
-  gen(stmt->condition);
-  return stmt->thenBranch, stmt->elseBranch;
+std::any AsmGen::visitTackyUnary(std::shared_ptr<TackyUnary> unary) {
+  // src and dest can only be constants or var
+  auto src = gen(unary->src).back();
+  auto dest = gen(unary->dest).back();
+
+  return std::vector<std::shared_ptr<Asm>>({
+    std::make_shared<AsmMov>(src, dest),
+    std::make_shared<AsmUnary>(unary->op, dest)});
 }
 
-std::any AsmGen::visitPrint(std::shared_ptr<Print> stmt) {
-  return stmt->expr;
+std::any AsmGen::visitTackyConstant(std::shared_ptr<TackyConstant> constant) {
+  return std::vector<std::shared_ptr<Asm>>({
+    std::make_shared<AsmImm>(constant->value)});
 }
 
-template <typename Arg>
-std::vector<std::shared_ptr<Asm>> make_vec(Arg&& list) {
-  return list;
+std::any AsmGen::visitTackyVar(std::shared_ptr<TackyVar> var) {
+  return std::vector<std::shared_ptr<Asm>>({
+    std::make_shared<AsmPseudo>(var->identifier)});
 }
-//  auto expr = gen(Stmt->value);
-//  std::vector<std::shared_ptr<Asm>> insts;
-//  insts.emplace_back(std::make_shared<AsmMov>(expr, std::make_shared<AsmRegister>(0)));
-//  insts.emplace_back(std::make_shared<AsmReturn>(0));
-//  return insts;
-//}
 
-std::any AsmGen::visitReturn(std::shared_ptr<Return> Stmt) {
-  //return std::vector<std::shared_ptr<Asm>>({std::make_shared<AsmReturn>(0), std::make_shared<AsmMov>(0,0)});
-  auto expr = gen(Stmt->value);
+std::any AsmGen::visitTackyReturn(std::shared_ptr<TackyReturn> ret) {
+  // tacky return can only be constants or var
+  auto expr = gen(ret->value).back();
   return std::vector<std::shared_ptr<Asm>>({
     std::make_shared<AsmMov>(expr, std::make_shared<AsmRegister>(0)),
     std::make_shared<AsmReturn>(0)});
-}
-
-std::any AsmGen::visitWhile(std::shared_ptr<While> Stmt) {
-  gen(Stmt->condition);
-  gen(Stmt->body);
-  return nullptr;
-}
-
-std::any AsmGen::visitVar(std::shared_ptr<Var> Stmt) {
-  return Stmt->name.lexeme, Stmt->init;
-}
-
-std::any AsmGen::visitAssign(std::shared_ptr<Assign> expr) {
-  return expr->name.lexeme, expr->value;
-}
-
-std::any AsmGen::visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) {
-  return expr->Operator.lexeme, expr->left, expr->right;
-}
-
-std::any AsmGen::visitLogical(std::shared_ptr<Logical> expr) {
-  return expr->Operator.lexeme, expr->left, expr->right;
-}
-
-std::any AsmGen::visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) {
-  assert(expr->type == TokenType::NUMBER);
-  return std::vector<std::shared_ptr<Asm>>({
-    std::make_shared<AsmImm>(expr->type, expr->value)});
-}
-
-std::any AsmGen::visitUnaryExpr(std::shared_ptr<UnaryExpr> expr) {
-  return expr->Operator.lexeme, expr->right;
-}
-
-std::any AsmGen::visitVariable(std::shared_ptr<Variable> expr) {
-  return expr->name.lexeme;
 }

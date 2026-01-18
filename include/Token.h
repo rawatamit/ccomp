@@ -12,7 +12,6 @@ enum class TokenType {
   RIGHT_BRACE,
   COMMA,
   DOT = 5,
-  MINUS,
   PLUS,
   SEMICOLON,
   SLASH,
@@ -20,6 +19,8 @@ enum class TokenType {
   TILDE,
 
   // One or two character tokens.
+  MINUS,
+  MINUS_MINUS,
   BANG,
   BANG_EQUAL,
   EQUAL,

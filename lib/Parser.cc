@@ -377,25 +377,12 @@ std::shared_ptr<Expr> Parser::primary() {
   if (match({TokenType::LEFT_PAREN})) {
     auto expr = expression();
     consume(TokenType::RIGHT_PAREN, "Expected ')' after expression.");
-    return nullptr;
+    return expr;
     // return std::static_pointer_cast<Expr>(std::make_shared<GroupingExpr>(expr));
   }
   if (match({TokenType::IDENTIFIER})) {
     return std::static_pointer_cast<Expr>(
         std::make_shared<Variable>(previous()));
-  }
-  if (match({TokenType::THIS})) {
-    return nullptr;
-    // return std::static_pointer_cast<Expr>(std::make_shared<This>(previous()));
-  }
-  if (match({TokenType::SUPER})) {
-    Token keyword = previous();
-    consume(TokenType::DOT, "Expected '.' after 'super'.");
-    Token method =
-        consume(TokenType::IDENTIFIER, "Expected superclass method name.");
-    return nullptr;
-    //return std::static_pointer_cast<Expr>(
-    //    std::make_shared<Super>(keyword, method));
   }
   throw error(peek(), "Expected expression.");
   return nullptr;

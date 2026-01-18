@@ -4,6 +4,7 @@
 #include "Scanner.h"
 #include "Parser.h"
 #include "AstPrinter.h"
+#include "TackyGen.h"
 #include "AsmGen.h"
 #include "Codegen.h"
 #include <cstdio>
@@ -16,7 +17,8 @@
 
 const int PHASE_LEX = 0x1;
 const int PHASE_PARSE = 0x2;
-const int PHASE_CODEGEN = 0x4;
+const int PHASE_TACKY = 0x4;
+const int PHASE_CODEGEN = 0x8;
 
 #define SETBIT(val, mask) ((val) |= (1<<(mask)))
 #define ISBITSET(val, mask) (((val) & (1<<(mask)))!=0)
@@ -64,13 +66,27 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
 	pp.print(stmts);
 #endif
 
+  if (!ISBITSET(compiler_phases, PHASE_TACKY)) {
+    printf("no tackygen\n");
+    return 0;
+  }
+
+  /// tackygen
+  ccomp::TackyGen tackygen(stmts, errorHandler);
+  auto tackyasm = tackygen.gen();
+  // if found error during parsing, report
+  if (errorHandler.foundError) {
+    errorHandler.report();
+    return 65;
+  }
+
   if (!ISBITSET(compiler_phases, PHASE_CODEGEN)) {
     printf("no codegen\n");
     return 0;
   }
 
   /// asmgen
-  ccomp::AsmGen asmgen(stmts, errorHandler);
+  ccomp::AsmGen asmgen(tackyasm, errorHandler);
   auto progasm = asmgen.gen();
   // if found error during parsing, report
   if (errorHandler.foundError) {
@@ -136,6 +152,7 @@ int main(int argc, char** argv) {
     int compiler_phases = 0;
     SETBIT(compiler_phases, PHASE_LEX);
     SETBIT(compiler_phases, PHASE_PARSE);
+    SETBIT(compiler_phases, PHASE_TACKY);
     SETBIT(compiler_phases, PHASE_CODEGEN);
 
     std::filesystem::path filepath(argv[1]);
@@ -161,9 +178,14 @@ int main(int argc, char** argv) {
     } else if (strcmp(opt, "--parse") == 0) {
       SETBIT(compiler_phases, PHASE_LEX);
       SETBIT(compiler_phases, PHASE_PARSE);
+    } else if (strcmp(opt, "--tacky") == 0) {
+      SETBIT(compiler_phases, PHASE_LEX);
+      SETBIT(compiler_phases, PHASE_PARSE);
+      SETBIT(compiler_phases, PHASE_TACKY);
     } else if (strcmp(opt, "--codegen") == 0) {
       SETBIT(compiler_phases, PHASE_LEX);
       SETBIT(compiler_phases, PHASE_PARSE);
+      SETBIT(compiler_phases, PHASE_TACKY);
       SETBIT(compiler_phases, PHASE_CODEGEN);
     }
 

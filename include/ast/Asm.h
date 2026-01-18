@@ -9,23 +9,29 @@ namespace ccomp {
 class Asm;
 class AsmProgram;
 class AsmFunction;
-class AsmBinaryInst;
+class AsmUnary;
 class AsmMov;
-class AsmImm;
+class AsmAllocateStack;
 class AsmReturn;
+class AsmImm;
 class AsmRegister;
+class AsmPseudo;
+class AsmStack;
 class Expr;
 
 class AsmVisitor {
 public:
   virtual ~AsmVisitor() {}
-  virtual std::any     visitAsmProgram     (std::shared_ptr<AsmProgram     > Asm) = 0;
-  virtual std::any     visitAsmFunction    (std::shared_ptr<AsmFunction    > Asm) = 0;
-  virtual std::any     visitAsmBinaryInst  (std::shared_ptr<AsmBinaryInst  > Asm) = 0;
-  virtual std::any     visitAsmMov (std::shared_ptr<AsmMov > Asm) = 0;
-  virtual std::any     visitAsmImm (std::shared_ptr<AsmImm > Asm) = 0;
-  virtual std::any     visitAsmReturn (std::shared_ptr<AsmReturn > Asm) = 0;
-  virtual std::any     visitAsmRegister (std::shared_ptr<AsmRegister > Asm) = 0;
+  virtual std::any     visitAsmProgram     (std::shared_ptr<AsmProgram     > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmFunction    (std::shared_ptr<AsmFunction    > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmUnary  (std::shared_ptr<AsmUnary  > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmMov (std::shared_ptr<AsmMov > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmAllocateStack (std::shared_ptr<AsmAllocateStack > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmReturn (std::shared_ptr<AsmReturn > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmImm (std::shared_ptr<AsmImm > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmRegister (std::shared_ptr<AsmRegister > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmPseudo (std::shared_ptr<AsmPseudo > Asm __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitAsmStack (std::shared_ptr<AsmStack > Asm __attribute_maybe_unused__) { return nullptr; }
 };
 
 class Asm {
@@ -59,44 +65,42 @@ public:
    std::vector<std::shared_ptr<Asm>> instructions;
 };
 
-class AsmBinaryInst   : public std::enable_shared_from_this<AsmBinaryInst  >, public Asm { 
+class AsmUnary   : public std::enable_shared_from_this<AsmUnary  >, public Asm { 
 public: 
-  AsmBinaryInst  (   Token op,    std::shared_ptr<Asm> src,    std::shared_ptr<Asm> dest)  :
-    op(op), src(src), dest(dest) {}
+  AsmUnary  (   Token op,    std::shared_ptr<Asm> operand)  :
+    op(op), operand(operand) {}
  std::any accept(AsmVisitor& visitor) override {
-    std::shared_ptr<AsmBinaryInst  > p{shared_from_this()};
-    return visitor.visitAsmBinaryInst  (p);
+    std::shared_ptr<AsmUnary  > p{shared_from_this()};
+    return visitor.visitAsmUnary  (p);
   }
 public: 
    Token op;
-   std::shared_ptr<Asm> src;
-   std::shared_ptr<Asm> dest;
+   std::shared_ptr<Asm> operand;
 };
 
 class AsmMov  : public std::enable_shared_from_this<AsmMov >, public Asm { 
 public: 
-  AsmMov (   std::vector<std::shared_ptr<Asm>> src,    std::shared_ptr<Asm> dest)  :
+  AsmMov (   std::shared_ptr<Asm> src,    std::shared_ptr<Asm> dest)  :
     src(src), dest(dest) {}
  std::any accept(AsmVisitor& visitor) override {
     std::shared_ptr<AsmMov > p{shared_from_this()};
     return visitor.visitAsmMov (p);
   }
 public: 
-   std::vector<std::shared_ptr<Asm>> src;
+   std::shared_ptr<Asm> src;
    std::shared_ptr<Asm> dest;
 };
 
-class AsmImm  : public std::enable_shared_from_this<AsmImm >, public Asm { 
+class AsmAllocateStack  : public std::enable_shared_from_this<AsmAllocateStack >, public Asm { 
 public: 
-  AsmImm (   TokenType type,    std::string operand)  :
-    type(type), operand(operand) {}
+  AsmAllocateStack (   int size)  :
+    size(size) {}
  std::any accept(AsmVisitor& visitor) override {
-    std::shared_ptr<AsmImm > p{shared_from_this()};
-    return visitor.visitAsmImm (p);
+    std::shared_ptr<AsmAllocateStack > p{shared_from_this()};
+    return visitor.visitAsmAllocateStack (p);
   }
 public: 
-   TokenType type;
-   std::string operand;
+   int size;
 };
 
 class AsmReturn  : public std::enable_shared_from_this<AsmReturn >, public Asm { 
@@ -111,16 +115,52 @@ public:
    int dummy;
 };
 
+class AsmImm  : public std::enable_shared_from_this<AsmImm >, public Asm { 
+public: 
+  AsmImm (   int value)  :
+    value(value) {}
+ std::any accept(AsmVisitor& visitor) override {
+    std::shared_ptr<AsmImm > p{shared_from_this()};
+    return visitor.visitAsmImm (p);
+  }
+public: 
+   int value;
+};
+
 class AsmRegister  : public std::enable_shared_from_this<AsmRegister >, public Asm { 
 public: 
-  AsmRegister (   int dummy)  :
-    dummy(dummy) {}
+  AsmRegister (   int reg)  :
+    reg(reg) {}
  std::any accept(AsmVisitor& visitor) override {
     std::shared_ptr<AsmRegister > p{shared_from_this()};
     return visitor.visitAsmRegister (p);
   }
 public: 
-   int dummy;
+   int reg;
+};
+
+class AsmPseudo  : public std::enable_shared_from_this<AsmPseudo >, public Asm { 
+public: 
+  AsmPseudo (   std::string identifier)  :
+    identifier(identifier) {}
+ std::any accept(AsmVisitor& visitor) override {
+    std::shared_ptr<AsmPseudo > p{shared_from_this()};
+    return visitor.visitAsmPseudo (p);
+  }
+public: 
+   std::string identifier;
+};
+
+class AsmStack  : public std::enable_shared_from_this<AsmStack >, public Asm { 
+public: 
+  AsmStack (   int offset)  :
+    offset(offset) {}
+ std::any accept(AsmVisitor& visitor) override {
+    std::shared_ptr<AsmStack > p{shared_from_this()};
+    return visitor.visitAsmStack (p);
+  }
+public: 
+   int offset;
 };
 
 } // end namespace
