@@ -51,15 +51,41 @@ std::any Codegen::visitAsmFunction(std::shared_ptr<AsmFunction> fn) {
 std::any Codegen::visitAsmUnary(std::shared_ptr<AsmUnary> unary) {
   auto operand = code(unary->operand);
   switch (unary->op.type) {
-    case ccomp::TokenType::MINUS:
+    case TokenType::MINUS:
       return std::format("negl {}", operand);
-    case ccomp::TokenType::TILDE:
+    case TokenType::TILDE:
       return std::format("notl {}", operand);
     default:
       assert(0);
       break;
   }
   return nullptr;
+}
+
+std::any Codegen::visitAsmBinary(std::shared_ptr<AsmBinary> bin) {
+  auto operand1 = code(bin->operand1);
+  auto operand2 = code(bin->operand2);
+  switch (bin->op.type) {
+    case TokenType::PLUS:
+      return std::format("addl {}, {}", operand1, operand2);
+    case TokenType::MINUS:
+      return std::format("subl {}, {}", operand1, operand2);
+    case TokenType::STAR:
+      return std::format("imull {}, {}", operand1, operand2);
+    default:
+      assert(0);
+      break;
+  }
+  return nullptr;
+}
+
+std::any Codegen::visitAsmIdiv(std::shared_ptr<AsmIdiv> idiv) {
+  auto operand = code(idiv->operand);
+  return std::format("idivl {}", operand);
+}
+
+std::any Codegen::visitAsmCdq(std::shared_ptr<AsmCdq>) {
+  return std::format("cdq");
 }
 
 std::any Codegen::visitAsmMov(std::shared_ptr<AsmMov> mov) {
@@ -81,14 +107,18 @@ std::any Codegen::visitAsmReturn(std::shared_ptr<AsmReturn> ret __attribute_mayb
 }
 
 std::any Codegen::visitAsmRegister(std::shared_ptr<AsmRegister> reg) {
-  switch (reg->reg) {
+  int index = reg->reg;
+  switch (index) {
     case 0:
       return std::string("%eax");
-    case 10:
-      return std::string("%r10d");
+    case 1:
+      return std::string("%ebx");
+    case 2:
+      return std::string("%ecx");
+    case 3:
+      return std::string("%edx");
     default:
-      assert(0);
-      break;
+      return std::format("%r{}d", index);
   }
   return nullptr;
 }

@@ -25,6 +25,7 @@ private:
   std::any visitTackyProgram(std::shared_ptr<TackyProgram> Tacky) override;
   std::any visitTackyFunction(std::shared_ptr<TackyFunction> Tacky) override;
   std::any visitTackyUnary(std::shared_ptr<TackyUnary> Tacky) override;
+  std::any visitTackyBinary(std::shared_ptr<TackyBinary> Tacky) override;
   std::any visitTackyConstant(std::shared_ptr<TackyConstant> Tacky) override;
   std::any visitTackyVar(std::shared_ptr<TackyVar> Tacky) override;
   std::any visitTackyReturn(std::shared_ptr<TackyReturn> Tacky) override;

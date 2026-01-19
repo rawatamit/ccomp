@@ -234,10 +234,6 @@ std::shared_ptr<Expr> Parser::assignment() {
       return std::static_pointer_cast<Expr>(
           std::make_shared<Assign>(name, value));
     }
-    /* else if (auto get = std::dynamic_pointer_cast<Get>(expr)) {
-      return std::static_pointer_cast<Expr>(
-          std::make_shared<Set>(get->object, get->name, value));
-    } */
 
     error(equals, "Invalid assignment target.");
   }
@@ -307,7 +303,7 @@ std::shared_ptr<Expr> Parser::term() {
 
 std::shared_ptr<Expr> Parser::factor() {
   auto expr = unary();
-  while (match({TokenType::SLASH, TokenType::STAR})) {
+  while (match({TokenType::SLASH, TokenType::STAR, TokenType::PERCENT})) {
     Token Operator = previous();
     auto right = unary();
     expr = std::static_pointer_cast<Expr>(
@@ -331,6 +327,10 @@ std::shared_ptr<Expr> Parser::call() {
 
   while (true) {
     if (match({TokenType::LEFT_PAREN})) {
+      // function call must begin with an identifier
+      if (auto le = std::dynamic_pointer_cast<LiteralExpr>(e)) {
+        throw error(previous(), "Expected identifier in call expression.");
+      }
       e = finishCall(e);
     } else if (match({TokenType::DOT})) {
       Token name =
@@ -363,17 +363,13 @@ std::shared_ptr<Expr> Parser::finishCall(std::shared_ptr<Expr> e __attribute_may
 
 std::shared_ptr<Expr> Parser::primary() {
   if (match({TokenType::FALSE}))
-    return std::static_pointer_cast<Expr>(
-        std::make_shared<LiteralExpr>(TokenType::FALSE, "false"));
+    return std::make_shared<LiteralExpr>(TokenType::FALSE, "false");
   if (match({TokenType::TRUE}))
-    return std::static_pointer_cast<Expr>(
-        std::make_shared<LiteralExpr>(TokenType::TRUE, "true"));
+    return std::make_shared<LiteralExpr>(TokenType::TRUE, "true");
   if (match({TokenType::NIL}))
-    return std::static_pointer_cast<Expr>(
-        std::make_shared<LiteralExpr>(TokenType::NIL, "nil"));
+    return std::make_shared<LiteralExpr>(TokenType::NIL, "nil");
   if (match({TokenType::NUMBER, TokenType::STRING}))
-    return std::static_pointer_cast<Expr>(
-        std::make_shared<LiteralExpr>(previous().type, previous().literal));
+    return std::make_shared<LiteralExpr>(previous().type, previous().literal);
   if (match({TokenType::LEFT_PAREN})) {
     auto expr = expression();
     consume(TokenType::RIGHT_PAREN, "Expected ')' after expression.");
@@ -381,8 +377,7 @@ std::shared_ptr<Expr> Parser::primary() {
     // return std::static_pointer_cast<Expr>(std::make_shared<GroupingExpr>(expr));
   }
   if (match({TokenType::IDENTIFIER})) {
-    return std::static_pointer_cast<Expr>(
-        std::make_shared<Variable>(previous()));
+    return std::make_shared<Variable>(previous());
   }
   throw error(peek(), "Expected expression.");
   return nullptr;

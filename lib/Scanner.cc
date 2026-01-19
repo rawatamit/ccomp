@@ -68,14 +68,17 @@ void Scanner::scanAndAddToken() {
   case '.':
     addToken(TokenType::DOT);
     break;
-  case '+':
-    addToken(TokenType::PLUS);
-    break;
   case ';':
     addToken(TokenType::SEMICOLON);
     break;
+  case '+':
+    addToken(TokenType::PLUS);
+    break;
   case '*':
     addToken(TokenType::STAR);
+    break;
+  case '%':
+    addToken(TokenType::PERCENT);
     break;
   case '~':
     addToken(TokenType::TILDE);

@@ -1,5 +1,4 @@
 #include "AsmGen.h"
-#include "Token.h"
 #include "ast/Asm.h"
 #include <algorithm>
 #include <any>
@@ -77,6 +76,65 @@ std::shared_ptr<AsmProgram> AsmGen::replace_pseudo_regs(std::shared_ptr<AsmProgr
       auto operand = fix_pseudo(unary->operand).back();
       return std::vector<std::shared_ptr<Asm>>{
         std::make_shared<AsmUnary>(unary->op, operand)};
+    }
+
+    std::any visitAsmBinary(std::shared_ptr<AsmBinary> bin) {
+      // shouldn't be anything other than a single instruction
+      auto operand1 = fix_pseudo(bin->operand1).back();
+      auto operand2 = fix_pseudo(bin->operand2).back();
+
+      switch (bin->op.type) {
+        case TokenType::PLUS:
+        case TokenType::MINUS:
+          if (std::dynamic_pointer_cast<AsmStack>(operand1) &&
+              std::dynamic_pointer_cast<AsmStack>(operand2)) {
+            // movl -4(%rbp), %r10d
+            // addl %r10d, -8(%rbp)
+            auto reg = std::make_shared<AsmRegister>(10);
+            return std::vector<std::shared_ptr<Asm>>{
+              std::make_shared<AsmMov>(operand1, reg),
+              std::make_shared<AsmBinary>(bin->op, reg, operand2)};
+          }
+          break;
+
+        case TokenType::STAR:
+          if (std::dynamic_pointer_cast<AsmStack>(operand2)) {
+            // movl -4(%rbp), %r11d
+            // imull $3, %r11d
+            // movl %r11d, -4(%rbp)
+            auto reg = std::make_shared<AsmRegister>(11);
+            return std::vector<std::shared_ptr<Asm>>{
+              std::make_shared<AsmMov>(operand2, reg),
+              std::make_shared<AsmBinary>(bin->op, operand1, reg),
+              std::make_shared<AsmMov>(reg, operand2)};
+          }
+        default:
+          break;
+      }
+
+      return std::vector<std::shared_ptr<Asm>>{
+        std::make_shared<AsmBinary>(bin->op, operand1, operand2)};
+    }
+
+    std::any visitAsmIdiv(std::shared_ptr<AsmIdiv> idiv) {
+      // shouldn't be anything other than a single instruction
+      auto operand = fix_pseudo(idiv->operand).back();
+
+      if (auto imm = std::dynamic_pointer_cast<AsmImm>(operand)) {
+        auto reg = std::make_shared<AsmRegister>(10);
+        return std::vector<std::shared_ptr<Asm>>{
+          // movl $3, %r10d
+          // idivl %r10d
+          std::make_shared<AsmMov>(imm, reg),
+          std::make_shared<AsmIdiv>(reg)};
+      } else {
+        return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmIdiv>(operand)};
+      }
+    }
+
+    std::any visitAsmCdq(std::shared_ptr<AsmCdq> cdq) {
+      return std::vector<std::shared_ptr<Asm>>{cdq};
     }
 
     std::any visitAsmMov(std::shared_ptr<AsmMov> mov) {
@@ -157,14 +215,43 @@ std::any AsmGen::visitTackyFunction(std::shared_ptr<TackyFunction> fn) {
   return std::make_shared<AsmFunction>(fn->name, insts);
 }
 
+std::any AsmGen::visitTackyBinary(std::shared_ptr<TackyBinary> bin) {
+  // src and dest can only be constants or var
+  auto src1 = gen(bin->src1).back();
+  auto src2 = gen(bin->src2).back();
+  auto dest = gen(bin->dest).back();
+
+  // division and remainder
+  TokenType optype = bin->op.type;
+  if ((optype == TokenType::SLASH) ||
+      (optype == TokenType::PERCENT)) {
+    // Mov(src1, Reg(AX))
+    // Cdq
+    // Idiv(src2)
+    // Mov(Reg(AX) or Reg(DX), dst)
+    int reg = (optype == TokenType::SLASH) ? 0 : 3;
+    return std::vector<std::shared_ptr<Asm>>{
+      std::make_shared<AsmMov>(src1, std::make_shared<AsmRegister>(0)),
+      std::make_shared<AsmCdq>(0),
+      std::make_shared<AsmIdiv>(src2),
+      std::make_shared<AsmMov>(std::make_shared<AsmRegister>(reg), dest)};
+  } else { // everything else
+    // Mov(src1, dst)
+    // Binary(op, src2, dst)
+    return std::vector<std::shared_ptr<Asm>>{
+      std::make_shared<AsmMov>(src1, dest),
+      std::make_shared<AsmBinary>(bin->op, src2, dest)};
+  }
+}
+
 std::any AsmGen::visitTackyUnary(std::shared_ptr<TackyUnary> unary) {
   // src and dest can only be constants or var
   auto src = gen(unary->src).back();
   auto dest = gen(unary->dest).back();
 
-  return std::vector<std::shared_ptr<Asm>>({
+  return std::vector<std::shared_ptr<Asm>>{
     std::make_shared<AsmMov>(src, dest),
-    std::make_shared<AsmUnary>(unary->op, dest)});
+    std::make_shared<AsmUnary>(unary->op, dest)};
 }
 
 std::any AsmGen::visitTackyConstant(std::shared_ptr<TackyConstant> constant) {

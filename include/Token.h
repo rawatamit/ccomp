@@ -17,6 +17,7 @@ enum class TokenType {
   SLASH,
   STAR = 10,
   TILDE,
+  PERCENT,
 
   // One or two character tokens.
   MINUS,

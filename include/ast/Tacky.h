@@ -10,6 +10,7 @@ class Tacky;
 class TackyProgram;
 class TackyFunction;
 class TackyUnary;
+class TackyBinary;
 class TackyConstant;
 class TackyVar;
 class TackyReturn;
@@ -21,6 +22,7 @@ public:
   virtual std::any     visitTackyProgram     (std::shared_ptr<TackyProgram     > Tacky __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitTackyFunction    (std::shared_ptr<TackyFunction    > Tacky __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitTackyUnary  (std::shared_ptr<TackyUnary  > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyBinary  (std::shared_ptr<TackyBinary  > Tacky __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitTackyConstant (std::shared_ptr<TackyConstant > Tacky __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitTackyVar (std::shared_ptr<TackyVar > Tacky __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitTackyReturn (std::shared_ptr<TackyReturn > Tacky __attribute_maybe_unused__) { return nullptr; }
@@ -68,6 +70,21 @@ public:
 public: 
    Token op;
    std::shared_ptr<Tacky> src;
+   std::shared_ptr<Tacky> dest;
+};
+
+class TackyBinary   : public std::enable_shared_from_this<TackyBinary  >, public Tacky { 
+public: 
+  TackyBinary  (   Token op,    std::shared_ptr<Tacky> src1,    std::shared_ptr<Tacky> src2,    std::shared_ptr<Tacky> dest)  :
+    op(op), src1(src1), src2(src2), dest(dest) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyBinary  > p{shared_from_this()};
+    return visitor.visitTackyBinary  (p);
+  }
+public: 
+   Token op;
+   std::shared_ptr<Tacky> src1;
+   std::shared_ptr<Tacky> src2;
    std::shared_ptr<Tacky> dest;
 };
 

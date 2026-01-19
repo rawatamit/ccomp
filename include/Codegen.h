@@ -25,6 +25,9 @@ private:
   std::any visitAsmProgram(std::shared_ptr<AsmProgram> Asm) override;
   std::any visitAsmFunction(std::shared_ptr<AsmFunction> Asm) override;
   std::any visitAsmUnary(std::shared_ptr<AsmUnary> Asm) override;
+  std::any visitAsmBinary(std::shared_ptr<AsmBinary> bin) override;
+  std::any visitAsmIdiv(std::shared_ptr<AsmIdiv> idiv) override;
+  std::any visitAsmCdq(std::shared_ptr<AsmCdq> cdq) override;
   std::any visitAsmMov(std::shared_ptr<AsmMov> Asm) override;
   std::any visitAsmAllocateStack(std::shared_ptr<AsmAllocateStack> Asm) override;
   std::any visitAsmReturn(std::shared_ptr<AsmReturn> Asm) override;

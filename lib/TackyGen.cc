@@ -108,7 +108,46 @@ std::any TackyGen::visitAssign(std::shared_ptr<Assign> expr) {
 }
 
 std::any TackyGen::visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) {
-  return expr->Operator.lexeme, expr->left, expr->right;
+  // binary_operator = Add | Subtract | Multiply | Divide | Remainder
+  assert((expr->Operator.type == TokenType::PLUS) ||
+         (expr->Operator.type == TokenType::MINUS) ||
+         (expr->Operator.type == TokenType::STAR) ||
+         (expr->Operator.type == TokenType::SLASH) ||
+         (expr->Operator.type == TokenType::PERCENT));
+
+  std::vector<std::shared_ptr<Tacky>> insts;
+  // v1 = emit_tacky(e1, instructions)
+  std::vector<std::shared_ptr<Tacky>> left_code =
+    (std::any_cast<std::vector<std::shared_ptr<Tacky>>>(gen(expr->left)));
+
+  // source var is at the end of the code
+  std::shared_ptr<Tacky> src1 = left_code.back();
+
+  // copy while skipping last entry, which is the variable
+  std::copy(left_code.begin(), left_code.end() - 1, std::back_inserter(insts));
+
+  // v2 = emit_tacky(e2, instructions)
+  std::vector<std::shared_ptr<Tacky>> right_code =
+    (std::any_cast<std::vector<std::shared_ptr<Tacky>>>(gen(expr->right)));
+
+  // source var is at the end of the code
+  std::shared_ptr<Tacky> src2 = right_code.back();
+
+  // copy while skipping last entry, which is the variable
+  std::copy(right_code.begin(), right_code.end() - 1, std::back_inserter(insts));
+
+  // dst_name = make_temporary()
+  // dst = Var(dst_name)
+  auto dst = std::make_shared<TackyVar>(unique_var());
+
+  // tacky_op = convert_binop(op)
+  // instructions.append(Binary(tacky_op, v1, v2, dst))
+  // NOTE: tacky_op and expr->Operator are the same.
+  insts.emplace_back(std::make_shared<TackyBinary>(expr->Operator, src1, src2, dst));
+
+  // return dst
+  insts.emplace_back(dst);
+  return insts;
 }
 
 std::any TackyGen::visitLogical(std::shared_ptr<Logical> expr) {
@@ -122,6 +161,9 @@ std::any TackyGen::visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) {
 }
 
 std::any TackyGen::visitUnaryExpr(std::shared_ptr<UnaryExpr> expr) {
+  // unary_operator = Complement | Negate
+  assert((expr->Operator.type == TokenType::TILDE) ||
+         (expr->Operator.type == TokenType::MINUS));
   std::vector<std::shared_ptr<Tacky>> insts;
 
   // src = emit_tacky(inner, instructions)

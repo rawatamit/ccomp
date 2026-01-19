@@ -177,11 +177,9 @@ int main(int argc, char **argv) {
     const AstSpecification exprSpec = {
         "Expr",
         {"Assign       :Token name, std::shared_ptr<Expr> value",
-         "BinaryExpr   :std::shared_ptr<Expr> left, Token Operator, "
-         "std::shared_ptr<Expr> right",
+         "BinaryExpr   :std::shared_ptr<Expr> left, Token Operator, std::shared_ptr<Expr> right",
          "LiteralExpr : TokenType type, std::string value",
-         "Logical  : std::shared_ptr<Expr> left, Token Operator, "
-         "std::shared_ptr<Expr> right",
+         "Logical  : std::shared_ptr<Expr> left, Token Operator, std::shared_ptr<Expr> right",
          "UnaryExpr    :Token Operator, std::shared_ptr<Expr> right",
          "Variable     :Token name"},
         {{"CObject", "accept", "ExprVisitor"}}};
@@ -191,17 +189,12 @@ int main(int argc, char **argv) {
     const AstSpecification stmtSpec = {
         "Stmt",
         {"Block      : std::vector<std::shared_ptr<Stmt>> stmts",
-         //"Class      : Token name, std::shared_ptr<Variable> superclass, "
-         //"std::vector<std::shared_ptr<Function>> methods",
          "Expression : std::shared_ptr<Expr> expr",
-         "Function   : Token name, std::vector<Token> params, "
-         "std::vector<std::shared_ptr<Stmt>> body",
-         "If         : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> "
-         "thenBranch, std::shared_ptr<Stmt> elseBranch",
+         "Function   : Token name, std::vector<Token> params, std::vector<std::shared_ptr<Stmt>> body",
+         "If         : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch, std::shared_ptr<Stmt> elseBranch",
          "Print      : std::shared_ptr<Expr> expr",
          "Return     : Token keyword, std::shared_ptr<Expr> value",
-         "While      : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> "
-         "body",
+         "While      : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> body",
          "Var        : Token name, std::shared_ptr<Expr> init"},
         {{"CObject", "accept", "StmtVisitor"}}};
     AstGen stmtGenerator(outDir, stmtSpec);
@@ -212,6 +205,7 @@ int main(int argc, char **argv) {
         {"TackyProgram     : std::vector<std::shared_ptr<Tacky>> functions",
             "TackyFunction    : Token name, std::vector<std::shared_ptr<Tacky>> instructions",
             "TackyUnary  : Token op, std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest",
+            "TackyBinary  : Token op, std::shared_ptr<Tacky> src1, std::shared_ptr<Tacky> src2, std::shared_ptr<Tacky> dest",
             "TackyConstant : int value",
             "TackyVar : std::string identifier",
             "TackyReturn : std::shared_ptr<Tacky> value",
@@ -223,15 +217,18 @@ int main(int argc, char **argv) {
     const AstSpecification asmSpec = {
         "Asm",
         {"AsmProgram     : std::vector<std::shared_ptr<Asm>> functions",
-            "AsmFunction    : Token name, std::vector<std::shared_ptr<Asm>> instructions",
-            "AsmUnary  : Token op, std::shared_ptr<Asm> operand",
-            "AsmMov : std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest",
-            "AsmAllocateStack : int size",
-            "AsmReturn : int dummy",
-            "AsmImm : int value",
-            "AsmRegister : int reg",
-            "AsmPseudo : std::string identifier",
-            "AsmStack : int offset",
+                "AsmFunction    : Token name, std::vector<std::shared_ptr<Asm>> instructions",
+                "AsmUnary       : Token op, std::shared_ptr<Asm> operand",
+                "AsmBinary      : Token op, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2",
+                "AsmIdiv        : std::shared_ptr<Asm> operand",
+                "AsmCdq         : int dummy",
+                "AsmMov         : std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest",
+                "AsmAllocateStack : int size",
+                "AsmReturn      : int dummy",
+                "AsmImm         : int value",
+                "AsmRegister    : int reg",
+                "AsmPseudo      : std::string identifier",
+                "AsmStack      : int offset",
         },
         {{"Asm", "accept", "AsmVisitor"}}};
     AstGen asmGenerator(outDir, asmSpec);
