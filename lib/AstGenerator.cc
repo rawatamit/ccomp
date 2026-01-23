@@ -27,6 +27,11 @@ static std::vector<std::string> split(const std::string &str,
 struct AstSpecification {
  std::string name;
  std::vector<std::string> types;
+ // enums
+ std::vector<
+    std::tuple<std::string,
+        std::vector<std::string>>>
+    enums;
  // Return type, and visitor name
  std::vector<
     std::tuple<
@@ -80,6 +85,13 @@ public:
 
     file << "class " << baseName << " {" << std::endl;
     file << "public:" << std::endl;
+    for (auto& anenum : astSpec.enums) {
+      file << "  enum " << std::get<0>(anenum) << " {\n";
+      for (auto& field : std::get<1>(anenum)) {
+        file << "    " << field << ",\n";
+      }
+      file << "  };\n";
+    }
     file << "  virtual ~" << baseName << "() {}" << std::endl;
     file << "  virtual std::any accept("
          << baseName + "Visitor& visitor) = 0;" << '\n';
@@ -140,7 +152,6 @@ public:
   void defineVisitor(std::ofstream &file,
     const std::string &className, const std::string& retType __attribute_maybe_unused__,
     const std::string& visitorName, const std::string& visitorArg) {
-    //file << " std::shared_ptr<" << retType << "> " << visitorName << '('
     file << " std::any " << visitorName << '('
          << visitorArg << "& visitor) override {\n";
     file << "    std::shared_ptr<" << className << "> p{shared_from_this()};"
@@ -179,9 +190,9 @@ int main(int argc, char **argv) {
         {"Assign       :Token name, std::shared_ptr<Expr> value",
          "BinaryExpr   :std::shared_ptr<Expr> left, Token Operator, std::shared_ptr<Expr> right",
          "LiteralExpr : TokenType type, std::string value",
-         "Logical  : std::shared_ptr<Expr> left, Token Operator, std::shared_ptr<Expr> right",
          "UnaryExpr    :Token Operator, std::shared_ptr<Expr> right",
          "Variable     :Token name"},
+        {},
         {{"CObject", "accept", "ExprVisitor"}}};
     AstGen exprGenerator(outDir, exprSpec);
     exprGenerator.generate();
@@ -189,13 +200,14 @@ int main(int argc, char **argv) {
     const AstSpecification stmtSpec = {
         "Stmt",
         {"Block      : std::vector<std::shared_ptr<Stmt>> stmts",
-         "Expression : std::shared_ptr<Expr> expr",
-         "Function   : Token name, std::vector<Token> params, std::vector<std::shared_ptr<Stmt>> body",
-         "If         : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch, std::shared_ptr<Stmt> elseBranch",
-         "Print      : std::shared_ptr<Expr> expr",
-         "Return     : Token keyword, std::shared_ptr<Expr> value",
-         "While      : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> body",
-         "Var        : Token name, std::shared_ptr<Expr> init"},
+            "Expression : std::shared_ptr<Expr> expr",
+            "Function   : Token name, std::vector<Token> params, std::vector<std::shared_ptr<Stmt>> body",
+            "If         : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch, std::shared_ptr<Stmt> elseBranch",
+            "Print      : std::shared_ptr<Expr> expr",
+            "Return     : Token keyword, std::shared_ptr<Expr> value",
+            "While      : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> body",
+            "Var        : Token name, std::shared_ptr<Expr> init"},
+        {},
         {{"CObject", "accept", "StmtVisitor"}}};
     AstGen stmtGenerator(outDir, stmtSpec);
     stmtGenerator.generate();
@@ -209,7 +221,12 @@ int main(int argc, char **argv) {
             "TackyConstant : int value",
             "TackyVar : std::string identifier",
             "TackyReturn : std::shared_ptr<Tacky> value",
-        },
+            "TackyCopy : std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest",
+            "TackyJump : std::shared_ptr<TackyLabel> target",
+            "TackyJumpIfZero : std::shared_ptr<Tacky> condition, std::shared_ptr<TackyLabel> target",
+            "TackyJumpIfNotZero : std::shared_ptr<Tacky> condition, std::shared_ptr<TackyLabel> target",
+            "TackyLabel : std::string identifier"},
+        {},
         {{"Tacky", "accept", "TackyVisitor"}}};
     AstGen tackyGenerator(outDir, tackySpec);
     tackyGenerator.generate();
@@ -220,16 +237,22 @@ int main(int argc, char **argv) {
                 "AsmFunction    : Token name, std::vector<std::shared_ptr<Asm>> instructions",
                 "AsmUnary       : Token op, std::shared_ptr<Asm> operand",
                 "AsmBinary      : Token op, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2",
+                "AsmCmp         : std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2",
                 "AsmIdiv        : std::shared_ptr<Asm> operand",
                 "AsmCdq         : int dummy",
+                "AsmJmp         : std::shared_ptr<AsmLabel> target",
+                "AsmJmpCC       : Asm::CondCode cond_code, std::shared_ptr<AsmLabel> target",
+                "AsmSetCC       : Asm::CondCode cond_code, std::shared_ptr<Asm> operand",
+                "AsmLabel      : std::string identifier",
                 "AsmMov         : std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest",
                 "AsmAllocateStack : int size",
                 "AsmReturn      : int dummy",
                 "AsmImm         : int value",
-                "AsmRegister    : int reg",
+                "AsmRegister    : Asm::Reg reg",
                 "AsmPseudo      : std::string identifier",
-                "AsmStack      : int offset",
-        },
+                "AsmStack       : int offset"},
+        {{"CondCode", {"E", "NE", "G", "GE", "L", "LE"}},
+                {"Reg", {"AX", "DX", "R10", "R11"}}},
         {{"Asm", "accept", "AsmVisitor"}}};
     AstGen asmGenerator(outDir, asmSpec);
     asmGenerator.generate();

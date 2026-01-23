@@ -29,6 +29,11 @@ private:
   std::any visitTackyConstant(std::shared_ptr<TackyConstant> Tacky) override;
   std::any visitTackyVar(std::shared_ptr<TackyVar> Tacky) override;
   std::any visitTackyReturn(std::shared_ptr<TackyReturn> Tacky) override;
+  std::any visitTackyCopy(std::shared_ptr<TackyCopy> copy) override;
+  std::any visitTackyJump(std::shared_ptr<TackyJump> jmp) override;
+  std::any visitTackyJumpIfZero(std::shared_ptr<TackyJumpIfZero> jmp) override;
+  std::any visitTackyJumpIfNotZero(std::shared_ptr<TackyJumpIfNotZero> jmp) override;
+  std::any visitTackyLabel(std::shared_ptr<TackyLabel> label) override;
 };
 }
 

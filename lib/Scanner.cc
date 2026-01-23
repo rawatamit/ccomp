@@ -10,24 +10,16 @@ Scanner::Scanner(const std::string &aSource, ErrorHandler &aErrorHandler)
   reservedKeywords["int"] = TokenType::INT;
   reservedKeywords["void"] = TokenType::VOID;
   reservedKeywords["return"] = TokenType::RETURN;
-  #if 1
-  reservedKeywords["and"] = TokenType::AND;
-  reservedKeywords["class"] = TokenType::CLASS;
   reservedKeywords["else"] = TokenType::ELSE;
   reservedKeywords["false"] = TokenType::FALSE;
   reservedKeywords["for"] = TokenType::FOR;
   reservedKeywords["fun"] = TokenType::FUN;
   reservedKeywords["if"] = TokenType::IF;
   reservedKeywords["nil"] = TokenType::NIL;
-  reservedKeywords["or"] = TokenType::OR;
   reservedKeywords["print"] = TokenType::PRINT;
   reservedKeywords["return"] = TokenType::RETURN;
-  reservedKeywords["super"] = TokenType::SUPER;
-  reservedKeywords["this"] = TokenType::THIS;
   reservedKeywords["true"] = TokenType::TRUE;
-  reservedKeywords["var"] = TokenType::VAR;
   reservedKeywords["while"] = TokenType::WHILE;
-  #endif
 }
 
 char Scanner::advanceAndGetChar() {
@@ -91,6 +83,12 @@ void Scanner::scanAndAddToken() {
     break;
   case '=':
     addToken(matchAndAdvance('=') ? TokenType::EQUAL_EQUAL : TokenType::EQUAL);
+    break;
+  case '&':
+    addToken(matchAndAdvance('&') ? TokenType::AMPERSAND_AMPERSAND : TokenType::AMPERSAND);
+    break;
+  case '|':
+    addToken(matchAndAdvance('|') ? TokenType::PIPE_PIPE : TokenType::PIPE);
     break;
   case '<':
     addToken(matchAndAdvance('=') ? TokenType::LESS_EQUAL : TokenType::LESS);

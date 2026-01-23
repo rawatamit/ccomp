@@ -89,9 +89,6 @@ public:
   std::any visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) override {
     return parenthesizeE(expr->Operator.lexeme, {expr->left, expr->right});
   }
-  std::any visitLogical(std::shared_ptr<Logical> expr) override {
-    return parenthesizeE(expr->Operator.lexeme, {expr->left, expr->right});
-  }
 #if 0
   any visitSet(std::shared_ptr<Set> Expr __attribute_maybe_unused__) override {
     return nullptr;

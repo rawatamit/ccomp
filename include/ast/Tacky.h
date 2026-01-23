@@ -14,6 +14,11 @@ class TackyBinary;
 class TackyConstant;
 class TackyVar;
 class TackyReturn;
+class TackyCopy;
+class TackyJump;
+class TackyJumpIfZero;
+class TackyJumpIfNotZero;
+class TackyLabel;
 class Expr;
 
 class TackyVisitor {
@@ -26,6 +31,11 @@ public:
   virtual std::any     visitTackyConstant (std::shared_ptr<TackyConstant > Tacky __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitTackyVar (std::shared_ptr<TackyVar > Tacky __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitTackyReturn (std::shared_ptr<TackyReturn > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyCopy (std::shared_ptr<TackyCopy > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyJump (std::shared_ptr<TackyJump > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyJumpIfZero (std::shared_ptr<TackyJumpIfZero > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyJumpIfNotZero (std::shared_ptr<TackyJumpIfNotZero > Tacky __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitTackyLabel (std::shared_ptr<TackyLabel > Tacky __attribute_maybe_unused__) { return nullptr; }
 };
 
 class Tacky {
@@ -122,6 +132,69 @@ public:
   }
 public: 
    std::shared_ptr<Tacky> value;
+};
+
+class TackyCopy  : public std::enable_shared_from_this<TackyCopy >, public Tacky { 
+public: 
+  TackyCopy (   std::shared_ptr<Tacky> src,    std::shared_ptr<Tacky> dest)  :
+    src(src), dest(dest) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyCopy > p{shared_from_this()};
+    return visitor.visitTackyCopy (p);
+  }
+public: 
+   std::shared_ptr<Tacky> src;
+   std::shared_ptr<Tacky> dest;
+};
+
+class TackyJump  : public std::enable_shared_from_this<TackyJump >, public Tacky { 
+public: 
+  TackyJump (   std::shared_ptr<TackyLabel> target)  :
+    target(target) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyJump > p{shared_from_this()};
+    return visitor.visitTackyJump (p);
+  }
+public: 
+   std::shared_ptr<TackyLabel> target;
+};
+
+class TackyJumpIfZero  : public std::enable_shared_from_this<TackyJumpIfZero >, public Tacky { 
+public: 
+  TackyJumpIfZero (   std::shared_ptr<Tacky> condition,    std::shared_ptr<TackyLabel> target)  :
+    condition(condition), target(target) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyJumpIfZero > p{shared_from_this()};
+    return visitor.visitTackyJumpIfZero (p);
+  }
+public: 
+   std::shared_ptr<Tacky> condition;
+   std::shared_ptr<TackyLabel> target;
+};
+
+class TackyJumpIfNotZero  : public std::enable_shared_from_this<TackyJumpIfNotZero >, public Tacky { 
+public: 
+  TackyJumpIfNotZero (   std::shared_ptr<Tacky> condition,    std::shared_ptr<TackyLabel> target)  :
+    condition(condition), target(target) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyJumpIfNotZero > p{shared_from_this()};
+    return visitor.visitTackyJumpIfNotZero (p);
+  }
+public: 
+   std::shared_ptr<Tacky> condition;
+   std::shared_ptr<TackyLabel> target;
+};
+
+class TackyLabel  : public std::enable_shared_from_this<TackyLabel >, public Tacky { 
+public: 
+  TackyLabel (   std::string identifier)  :
+    identifier(identifier) {}
+ std::any accept(TackyVisitor& visitor) override {
+    std::shared_ptr<TackyLabel > p{shared_from_this()};
+    return visitor.visitTackyLabel (p);
+  }
+public: 
+   std::string identifier;
 };
 
 } // end namespace

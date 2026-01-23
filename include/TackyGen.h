@@ -20,7 +20,10 @@ private:
   std::vector<std::shared_ptr<Tacky>> gen(std::shared_ptr<Stmt> stmt);
   std::vector<std::shared_ptr<Tacky>> gen(std::vector<std::shared_ptr<Expr>> exprs);
   std::vector<std::shared_ptr<Tacky>> gen(std::vector<std::shared_ptr<Stmt>> stmts);
+
+  std::any genLogical(std::shared_ptr<BinaryExpr> expr);
   std::string unique_var();
+  std::shared_ptr<TackyLabel> unique_label(const std::string& desc);
 
 private:
   std::any visitBlock(std::shared_ptr<Block> stmt) override;
@@ -33,7 +36,6 @@ private:
   std::any visitVar(std::shared_ptr<Var> Stmt) override;
   std::any visitAssign(std::shared_ptr<Assign> expr) override;
   std::any visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) override;
-  std::any visitLogical(std::shared_ptr<Logical> expr) override;
   std::any visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) override;
   std::any visitUnaryExpr(std::shared_ptr<UnaryExpr> expr) override;
   std::any visitVariable(std::shared_ptr<Variable> expr) override;

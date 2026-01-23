@@ -1,5 +1,6 @@
 #include "AsmGen.h"
 #include "ast/Asm.h"
+#include "Util.h"
 #include <algorithm>
 #include <any>
 #include <cassert>
@@ -90,7 +91,7 @@ std::shared_ptr<AsmProgram> AsmGen::replace_pseudo_regs(std::shared_ptr<AsmProgr
               std::dynamic_pointer_cast<AsmStack>(operand2)) {
             // movl -4(%rbp), %r10d
             // addl %r10d, -8(%rbp)
-            auto reg = std::make_shared<AsmRegister>(10);
+            auto reg = std::make_shared<AsmRegister>(Asm::Reg::R10);
             return std::vector<std::shared_ptr<Asm>>{
               std::make_shared<AsmMov>(operand1, reg),
               std::make_shared<AsmBinary>(bin->op, reg, operand2)};
@@ -102,7 +103,7 @@ std::shared_ptr<AsmProgram> AsmGen::replace_pseudo_regs(std::shared_ptr<AsmProgr
             // movl -4(%rbp), %r11d
             // imull $3, %r11d
             // movl %r11d, -4(%rbp)
-            auto reg = std::make_shared<AsmRegister>(11);
+            auto reg = std::make_shared<AsmRegister>(Asm::Reg::R11);
             return std::vector<std::shared_ptr<Asm>>{
               std::make_shared<AsmMov>(operand2, reg),
               std::make_shared<AsmBinary>(bin->op, operand1, reg),
@@ -116,12 +117,33 @@ std::shared_ptr<AsmProgram> AsmGen::replace_pseudo_regs(std::shared_ptr<AsmProgr
         std::make_shared<AsmBinary>(bin->op, operand1, operand2)};
     }
 
+    std::any visitAsmCmp(std::shared_ptr<AsmCmp> cmp) {
+      auto operand1 = fix_pseudo(cmp->operand1).back();
+      auto operand2 = fix_pseudo(cmp->operand2).back();
+
+      if (std::dynamic_pointer_cast<AsmStack>(operand1) &&
+          std::dynamic_pointer_cast<AsmStack>(operand2)) {
+        auto reg = std::make_shared<AsmRegister>(Asm::Reg::R10);
+        return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmMov>(operand1, reg),
+          std::make_shared<AsmCmp>(reg, operand2)};
+      } else if (auto imm = std::dynamic_pointer_cast<AsmImm>(operand2)) {
+        auto reg = std::make_shared<AsmRegister>(Asm::Reg::R11);
+        return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmMov>(imm, reg),
+          std::make_shared<AsmCmp>(operand1, reg)};
+      } else {
+        return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmCmp>(operand1, operand2)};
+      }
+    }
+
     std::any visitAsmIdiv(std::shared_ptr<AsmIdiv> idiv) {
       // shouldn't be anything other than a single instruction
       auto operand = fix_pseudo(idiv->operand).back();
 
       if (auto imm = std::dynamic_pointer_cast<AsmImm>(operand)) {
-        auto reg = std::make_shared<AsmRegister>(10);
+        auto reg = std::make_shared<AsmRegister>(Asm::Reg::R10);
         return std::vector<std::shared_ptr<Asm>>{
           // movl $3, %r10d
           // idivl %r10d
@@ -137,20 +159,43 @@ std::shared_ptr<AsmProgram> AsmGen::replace_pseudo_regs(std::shared_ptr<AsmProgr
       return std::vector<std::shared_ptr<Asm>>{cdq};
     }
 
+    std::any visitAsmJmp(std::shared_ptr<AsmJmp> jmp) { 
+      auto target = fix_pseudo(jmp->target).back();
+      return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmJmp>(std::dynamic_pointer_cast<AsmLabel>(target))};
+    }
+
+    std::any visitAsmJmpCC(std::shared_ptr<AsmJmpCC> jmp) {
+      auto target = fix_pseudo(jmp->target).back();
+      return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmJmpCC>(jmp->cond_code,
+              std::dynamic_pointer_cast<AsmLabel>(target))};
+    }
+
+    std::any visitAsmSetCC(std::shared_ptr<AsmSetCC> setcc) {
+      auto operand = fix_pseudo(setcc->operand).back();
+      return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmSetCC>(setcc->cond_code, operand)};
+    }
+
+    std::any visitAsmLabel(std::shared_ptr<AsmLabel> label) {
+      return std::vector<std::shared_ptr<Asm>>{label};
+    }
+
     std::any visitAsmMov(std::shared_ptr<AsmMov> mov) {
       auto src = fix_pseudo(mov->src).back();
       auto dest = fix_pseudo(mov->dest).back();
 
       if (std::dynamic_pointer_cast<AsmStack>(src) &&
           std::dynamic_pointer_cast<AsmStack>(dest)) {
-        auto reg = std::make_shared<AsmRegister>(10);
+        auto reg = std::make_shared<AsmRegister>(Asm::Reg::R10);
         return std::vector<std::shared_ptr<Asm>>{
           std::make_shared<AsmMov>(src, reg),
           std::make_shared<AsmMov>(reg, dest)};
+      } else {
+        return std::vector<std::shared_ptr<Asm>>{
+          std::make_shared<AsmMov>(src, dest)};
       }
-
-      return std::vector<std::shared_ptr<Asm>>{
-        std::make_shared<AsmMov>(src, dest)};
     }
 
     std::any visitAsmAllocateStack(std::shared_ptr<AsmAllocateStack>) {
@@ -221,17 +266,50 @@ std::any AsmGen::visitTackyBinary(std::shared_ptr<TackyBinary> bin) {
   auto src2 = gen(bin->src2).back();
   auto dest = gen(bin->dest).back();
 
-  // division and remainder
   TokenType optype = bin->op.type;
-  if ((optype == TokenType::SLASH) ||
+  if (isRelationalOp(optype)) {
+    Asm::CondCode cc = Asm::CondCode::E;
+    switch (optype) {
+      case TokenType::EQUAL_EQUAL:
+        cc = Asm::CondCode::E;
+        break;
+      case TokenType::BANG_EQUAL:
+        cc = Asm::CondCode::NE;
+        break;
+      case TokenType::GREATER:
+        cc = Asm::CondCode::G;
+        break;
+      case TokenType::GREATER_EQUAL:
+        cc = Asm::CondCode::GE;
+        break;
+      case TokenType::LESS:
+        cc = Asm::CondCode::L;
+        break;
+      case TokenType::LESS_EQUAL:
+        cc = Asm::CondCode::LE;
+        break;
+      default:
+        assert(0);
+        break;
+    }
+
+    // Cmp(src2, src1)
+    // Mov(Imm(0), dst)
+    // SetCC(relational_operator, dst)
+    return std::vector<std::shared_ptr<Asm>>{
+      std::make_shared<AsmCmp>(src2, src1),
+      std::make_shared<AsmMov>(std::make_shared<AsmImm>(0), dest),
+      std::make_shared<AsmSetCC>(cc, dest)};
+  } else if ((optype == TokenType::SLASH) ||
       (optype == TokenType::PERCENT)) {
+    // division and remainder
     // Mov(src1, Reg(AX))
     // Cdq
     // Idiv(src2)
     // Mov(Reg(AX) or Reg(DX), dst)
-    int reg = (optype == TokenType::SLASH) ? 0 : 3;
+    Asm::Reg reg = (optype == TokenType::SLASH) ? Asm::Reg::AX : Asm::Reg::DX;
     return std::vector<std::shared_ptr<Asm>>{
-      std::make_shared<AsmMov>(src1, std::make_shared<AsmRegister>(0)),
+      std::make_shared<AsmMov>(src1, std::make_shared<AsmRegister>(Asm::Reg::AX)),
       std::make_shared<AsmCdq>(0),
       std::make_shared<AsmIdiv>(src2),
       std::make_shared<AsmMov>(std::make_shared<AsmRegister>(reg), dest)};
@@ -249,9 +327,16 @@ std::any AsmGen::visitTackyUnary(std::shared_ptr<TackyUnary> unary) {
   auto src = gen(unary->src).back();
   auto dest = gen(unary->dest).back();
 
-  return std::vector<std::shared_ptr<Asm>>{
-    std::make_shared<AsmMov>(src, dest),
-    std::make_shared<AsmUnary>(unary->op, dest)};
+  if (unary->op.type == TokenType::BANG) {
+    return std::vector<std::shared_ptr<Asm>>{
+      std::make_shared<AsmCmp>(std::make_shared<AsmImm>(0), src),
+      std::make_shared<AsmMov>(std::make_shared<AsmImm>(0), dest),
+      std::make_shared<AsmSetCC>(Asm::CondCode::E, dest)};
+  } else {
+    return std::vector<std::shared_ptr<Asm>>{
+      std::make_shared<AsmMov>(src, dest),
+      std::make_shared<AsmUnary>(unary->op, dest)};
+  }
 }
 
 std::any AsmGen::visitTackyConstant(std::shared_ptr<TackyConstant> constant) {
@@ -268,6 +353,40 @@ std::any AsmGen::visitTackyReturn(std::shared_ptr<TackyReturn> ret) {
   // tacky return can only be constants or var
   auto expr = gen(ret->value).back();
   return std::vector<std::shared_ptr<Asm>>({
-    std::make_shared<AsmMov>(expr, std::make_shared<AsmRegister>(0)),
+    std::make_shared<AsmMov>(expr, std::make_shared<AsmRegister>(Asm::Reg::AX)),
     std::make_shared<AsmReturn>(0)});
+}
+
+std::any AsmGen::visitTackyCopy(std::shared_ptr<TackyCopy> copy) {
+  auto src = gen(copy->src).back();
+  auto dest = gen(copy->dest).back();
+  return std::vector<std::shared_ptr<Asm>>{
+    std::make_shared<AsmMov>(src, dest)};
+}
+
+std::any AsmGen::visitTackyJump(std::shared_ptr<TackyJump> jmp) {
+  auto target = std::dynamic_pointer_cast<AsmLabel>(gen(jmp->target).back());
+  return std::vector<std::shared_ptr<Asm>>{
+    std::make_shared<AsmJmp>(target)};
+}
+
+std::any AsmGen::visitTackyJumpIfZero(std::shared_ptr<TackyJumpIfZero> jmp) {
+  auto cond = gen(jmp->condition).back();
+  auto target = std::dynamic_pointer_cast<AsmLabel>(gen(jmp->target).back());
+  return std::vector<std::shared_ptr<Asm>>{
+    std::make_shared<AsmCmp>(std::make_shared<AsmImm>(0), cond),
+    std::make_shared<AsmJmpCC>(Asm::CondCode::E, target)};
+}
+
+std::any AsmGen::visitTackyJumpIfNotZero(std::shared_ptr<TackyJumpIfNotZero> jmp) {
+  auto cond = gen(jmp->condition).back();
+  auto target = std::dynamic_pointer_cast<AsmLabel>(gen(jmp->target).back());
+  return std::vector<std::shared_ptr<Asm>>{
+    std::make_shared<AsmCmp>(std::make_shared<AsmImm>(0), cond),
+    std::make_shared<AsmJmpCC>(Asm::CondCode::NE, target)};
+}
+
+std::any AsmGen::visitTackyLabel(std::shared_ptr<TackyLabel> label) {
+  return std::vector<std::shared_ptr<Asm>>{
+    std::make_shared<AsmLabel>(label->identifier)};
 }

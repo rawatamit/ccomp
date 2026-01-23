@@ -20,6 +20,10 @@ enum class TokenType {
   PERCENT,
 
   // One or two character tokens.
+  AMPERSAND,
+  AMPERSAND_AMPERSAND,
+  PIPE,
+  PIPE_PIPE,
   MINUS,
   MINUS_MINUS,
   BANG,
@@ -41,7 +45,6 @@ enum class TokenType {
   // Reserved keywords ARE identifiers but have seperate token types
   INT,
   VOID,
-  AND,
   CLASS,
   ELSE,
   FALSE,
@@ -49,7 +52,6 @@ enum class TokenType {
   FOR,
   IF,
   NIL,
-  OR,
   PRINT,
   RETURN,
   SUPER,

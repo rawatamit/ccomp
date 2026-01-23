@@ -244,11 +244,11 @@ std::shared_ptr<Expr> Parser::assignment() {
 std::shared_ptr<Expr> Parser::logic_or() {
   auto expr = logic_and();
 
-  while (match({TokenType::OR})) {
+  while (match({TokenType::PIPE_PIPE})) {
     Token op = previous();
     auto rhs = logic_and();
     expr = std::static_pointer_cast<Expr>(
-        std::make_shared<Logical>(expr, op, rhs));
+        std::make_shared<BinaryExpr>(expr, op, rhs));
   }
 
   return expr;
@@ -257,11 +257,11 @@ std::shared_ptr<Expr> Parser::logic_or() {
 std::shared_ptr<Expr> Parser::logic_and() {
   auto expr = equality();
 
-  while (match({TokenType::AND})) {
+  while (match({TokenType::AMPERSAND_AMPERSAND})) {
     Token op = previous();
     auto rhs = equality();
     expr = std::static_pointer_cast<Expr>(
-        std::make_shared<Logical>(expr, op, rhs));
+        std::make_shared<BinaryExpr>(expr, op, rhs));
   }
 
   return expr;

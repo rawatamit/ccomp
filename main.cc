@@ -130,17 +130,26 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
 }
 
 static int compileFile(const std::string& path, const char* outputpath, ccomp::ErrorHandler& errorHandler, int compiler_phases) {
-  std::ifstream file(path);
+  // preprocess file with gcc
+  std::filesystem::path filepath(path);
+  std::filesystem::path filestem = filepath.filename().stem();
+  std::filesystem::path preprocesedpath = filepath.parent_path() / (filestem.string() + ".pre");
+  std::string gcc_args = std::format("gcc -E -P {} -o {}", path, preprocesedpath.c_str());
+  int retCode = std::system(gcc_args.c_str());
+
+  std::ifstream file(preprocesedpath.c_str());
   // can't open file
   if (!file.is_open()) {
-    printf("can't open file %s\n", path.c_str());
-    return 70;
+    printf("can't open file %s\n", preprocesedpath.c_str());
+    retCode = 70;
+  } else {
+    std::ostringstream stream;
+    stream << file.rdbuf();
+    file.close();
+    retCode = compile(stream.str(), outputpath, errorHandler, compiler_phases);
   }
 
-  std::ostringstream stream;
-  stream << file.rdbuf();
-  file.close();
-  return compile(stream.str(), outputpath, errorHandler, compiler_phases);
+  return retCode;
 }
 
 int main(int argc, char** argv) {

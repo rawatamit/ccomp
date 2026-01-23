@@ -2,9 +2,9 @@
 #include "Token.h"
 #include "ast/Asm.h"
 #include "ast/Tacky.h"
+#include "Util.h"
 #include <any>
 #include <cassert>
-#include <concepts>
 #include <format>
 #include <iterator>
 #include <memory>
@@ -58,6 +58,11 @@ std::string TackyGen::unique_var() {
   return std::format("tmp.{}", nextId++);
 }
 
+std::shared_ptr<TackyLabel> TackyGen::unique_label(const std::string& desc) {
+  static int nextId = 0;
+  return std::make_shared<TackyLabel>(std::format("T{}.{}", desc, nextId++));
+}
+
 std::any TackyGen::visitBlock(std::shared_ptr<Block> stmt) {
   return gen(stmt->stmts);
 }
@@ -107,13 +112,81 @@ std::any TackyGen::visitAssign(std::shared_ptr<Assign> expr) {
   return expr->name.lexeme, expr->value;
 }
 
+std::any TackyGen::genLogical(std::shared_ptr<BinaryExpr> expr) {
+  TokenType op = expr->Operator.type;
+  std::vector<std::shared_ptr<Tacky>> insts;
+  // <instructions for e1>
+  std::vector<std::shared_ptr<Tacky>> left_code =
+    (std::any_cast<std::vector<std::shared_ptr<Tacky>>>(gen(expr->left)));
+  std::copy(left_code.begin(), left_code.end() - 1, std::back_inserter(insts));
+
+  // v1 = <result of e1>
+  std::shared_ptr<Tacky> v1 = left_code.back();
+
+  std::shared_ptr<TackyLabel> cond_true_label = unique_label("logical");
+  std::shared_ptr<TackyLabel> end_label = unique_label("logical");
+
+  // JumpIfZero|JumpIfNotZero(v1, cond_true_label)
+  if (op == TokenType::AMPERSAND_AMPERSAND) {
+    insts.emplace_back(std::make_shared<TackyJumpIfZero>(v1, cond_true_label));
+  } else if (op == TokenType::PIPE_PIPE) {
+    insts.emplace_back(std::make_shared<TackyJumpIfNotZero>(v1, cond_true_label));
+  }
+
+  // <instructions for e2>
+  std::vector<std::shared_ptr<Tacky>> right_code =
+    (std::any_cast<std::vector<std::shared_ptr<Tacky>>>(gen(expr->right)));
+  std::copy(right_code.begin(), right_code.end() - 1, std::back_inserter(insts));
+
+  // v2 = <result of e2>
+  std::shared_ptr<Tacky> v2 = right_code.back();
+
+  // JumpIfZero|JumpIfNotZero(v2, cond_true_label)
+  if (op == TokenType::AMPERSAND_AMPERSAND) {
+    insts.emplace_back(std::make_shared<TackyJumpIfZero>(v2, cond_true_label));
+  } else if (op == TokenType::PIPE_PIPE) {
+    insts.emplace_back(std::make_shared<TackyJumpIfNotZero>(v2, cond_true_label));
+  }
+
+  // result = 1|0
+  // && returns a 1 if both conditions were true. || returns a 0 if both
+  // conditions are false. Note we are using JumpIfZero for && and JumpIfNotZero
+  // for ||.
+  int result_after_two_checks = (op == TokenType::AMPERSAND_AMPERSAND) ? 1 : 0;
+  auto result = std::make_shared<TackyVar>(unique_var());
+  insts.emplace_back(std::make_shared<TackyCopy>(
+    std::make_shared<TackyConstant>(result_after_two_checks), result));
+
+  // Jump(end)
+  insts.emplace_back(std::make_shared<TackyJump>(end_label));
+
+  // Label(cond_true_label)
+  insts.emplace_back(cond_true_label);
+
+  // result = 0|1
+  int result_after_label = 1 - result_after_two_checks;
+  insts.emplace_back(std::make_shared<TackyCopy>(std::make_shared<TackyConstant>(result_after_label), result));
+
+  // Label(end)
+  insts.emplace_back(end_label);
+
+  insts.emplace_back(result);
+  return insts;
+}
+
 std::any TackyGen::visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) {
-  // binary_operator = Add | Subtract | Multiply | Divide | Remainder
-  assert((expr->Operator.type == TokenType::PLUS) ||
-         (expr->Operator.type == TokenType::MINUS) ||
-         (expr->Operator.type == TokenType::STAR) ||
-         (expr->Operator.type == TokenType::SLASH) ||
-         (expr->Operator.type == TokenType::PERCENT));
+  // binary_operator = Add | Subtract | Multiply | Divide | Remainder | Equal |
+  // NotEqual | LessThan | LessOrEqual | GreaterThan | GreaterOrEqual
+  TokenType op = expr->Operator.type;
+  bool isLogical = isLogicalOp(op);
+  assert(one_of(op, {TokenType::PLUS, TokenType::MINUS, TokenType::STAR,
+                TokenType::SLASH, TokenType::PERCENT}) ||
+         isLogical || isRelationalOp(op));
+  
+  // Logical operations are short circuited.
+  if (isLogical) {
+    return genLogical(expr);
+  }
 
   std::vector<std::shared_ptr<Tacky>> insts;
   // v1 = emit_tacky(e1, instructions)
@@ -150,10 +223,6 @@ std::any TackyGen::visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) {
   return insts;
 }
 
-std::any TackyGen::visitLogical(std::shared_ptr<Logical> expr) {
-  return expr->Operator.lexeme, expr->left, expr->right;
-}
-
 std::any TackyGen::visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) {
   assert(expr->type == TokenType::NUMBER);
   return std::vector<std::shared_ptr<Tacky>>({
@@ -161,9 +230,9 @@ std::any TackyGen::visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) {
 }
 
 std::any TackyGen::visitUnaryExpr(std::shared_ptr<UnaryExpr> expr) {
-  // unary_operator = Complement | Negate
-  assert((expr->Operator.type == TokenType::TILDE) ||
-         (expr->Operator.type == TokenType::MINUS));
+  // unary_operator = Complement | Negate | Not
+  assert(one_of(expr->Operator.type, {TokenType::TILDE, TokenType::MINUS,
+                TokenType::BANG}));
   std::vector<std::shared_ptr<Tacky>> insts;
 
   // src = emit_tacky(inner, instructions)

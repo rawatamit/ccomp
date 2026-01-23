@@ -10,7 +10,6 @@ class Expr;
 class Assign;
 class BinaryExpr;
 class LiteralExpr;
-class Logical;
 class UnaryExpr;
 class Variable;
 class Expr;
@@ -21,7 +20,6 @@ public:
   virtual std::any     visitAssign       (std::shared_ptr<Assign       > Expr __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitBinaryExpr   (std::shared_ptr<BinaryExpr   > Expr __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitLiteralExpr (std::shared_ptr<LiteralExpr > Expr __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitLogical  (std::shared_ptr<Logical  > Expr __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitUnaryExpr    (std::shared_ptr<UnaryExpr    > Expr __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitVariable     (std::shared_ptr<Variable     > Expr __attribute_maybe_unused__) { return nullptr; }
 };
@@ -70,20 +68,6 @@ public:
 public: 
    TokenType type;
    std::string value;
-};
-
-class Logical   : public std::enable_shared_from_this<Logical  >, public Expr { 
-public: 
-  Logical  (   std::shared_ptr<Expr> left,    Token Operator,    std::shared_ptr<Expr> right)  :
-    left(left), Operator(Operator), right(right) {}
- std::any accept(ExprVisitor& visitor) override {
-    std::shared_ptr<Logical  > p{shared_from_this()};
-    return visitor.visitLogical  (p);
-  }
-public: 
-   std::shared_ptr<Expr> left;
-   Token Operator;
-   std::shared_ptr<Expr> right;
 };
 
 class UnaryExpr     : public std::enable_shared_from_this<UnaryExpr    >, public Expr { 
