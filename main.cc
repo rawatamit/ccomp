@@ -3,6 +3,7 @@
 #include "ErrorHandler.h"
 #include "Scanner.h"
 #include "Parser.h"
+#include "Resolver.h"
 #include "AstPrinter.h"
 #include "TackyGen.h"
 #include "AsmGen.h"
@@ -17,8 +18,9 @@
 
 const int PHASE_LEX = 0x1;
 const int PHASE_PARSE = 0x2;
-const int PHASE_TACKY = 0x4;
-const int PHASE_CODEGEN = 0x8;
+const int PHASE_RESOLVE = 0x4;
+const int PHASE_TACKY = 0x8;
+const int PHASE_CODEGEN = 0xf;
 
 #define SETBIT(val, mask) ((val) |= (1<<(mask)))
 #define ISBITSET(val, mask) (((val) & (1<<(mask)))!=0)
@@ -66,6 +68,18 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
 	pp.print(stmts);
 #endif
 
+  if (!ISBITSET(compiler_phases, PHASE_RESOLVE)) {
+    printf("no resolution\n");
+    return 0;
+  }
+
+  ccomp::Resolver resolver(errorHandler);
+  resolver.resolve(stmts);
+  if (errorHandler.foundError) {
+    errorHandler.report();
+    return 65;
+  }
+
   if (!ISBITSET(compiler_phases, PHASE_TACKY)) {
     printf("no tackygen\n");
     return 0;
@@ -112,12 +126,6 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
   }
 
 #if 0
-  Resolver resolver(interpreter, errorHandler);
-  resolver.resolve(stmts);
-  if (errorHandler.foundError) {
-    errorHandler.report();
-    return 65;
-  }
 
   try {
     interpreter->interpret(stmts);
@@ -161,6 +169,7 @@ int main(int argc, char** argv) {
     int compiler_phases = 0;
     SETBIT(compiler_phases, PHASE_LEX);
     SETBIT(compiler_phases, PHASE_PARSE);
+    SETBIT(compiler_phases, PHASE_RESOLVE);
     SETBIT(compiler_phases, PHASE_TACKY);
     SETBIT(compiler_phases, PHASE_CODEGEN);
 
@@ -187,13 +196,19 @@ int main(int argc, char** argv) {
     } else if (strcmp(opt, "--parse") == 0) {
       SETBIT(compiler_phases, PHASE_LEX);
       SETBIT(compiler_phases, PHASE_PARSE);
+    } else if (strcmp(opt, "--validate") == 0) {
+      SETBIT(compiler_phases, PHASE_LEX);
+      SETBIT(compiler_phases, PHASE_PARSE);
+      SETBIT(compiler_phases, PHASE_RESOLVE);
     } else if (strcmp(opt, "--tacky") == 0) {
       SETBIT(compiler_phases, PHASE_LEX);
       SETBIT(compiler_phases, PHASE_PARSE);
+      SETBIT(compiler_phases, PHASE_RESOLVE);
       SETBIT(compiler_phases, PHASE_TACKY);
     } else if (strcmp(opt, "--codegen") == 0) {
       SETBIT(compiler_phases, PHASE_LEX);
       SETBIT(compiler_phases, PHASE_PARSE);
+      SETBIT(compiler_phases, PHASE_RESOLVE);
       SETBIT(compiler_phases, PHASE_TACKY);
       SETBIT(compiler_phases, PHASE_CODEGEN);
     }

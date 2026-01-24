@@ -187,11 +187,11 @@ int main(int argc, char **argv) {
     std::cout << "ast_generator generating files in " << outDir << std::endl;
     const AstSpecification exprSpec = {
         "Expr",
-        {"Assign       :Token name, std::shared_ptr<Expr> value",
-         "BinaryExpr   :std::shared_ptr<Expr> left, Token Operator, std::shared_ptr<Expr> right",
-         "LiteralExpr : TokenType type, std::string value",
-         "UnaryExpr    :Token Operator, std::shared_ptr<Expr> right",
-         "Variable     :Token name"},
+        {"Assign   : std::shared_ptr<Expr> lvalue, std::shared_ptr<Expr> value",
+         "BinaryExpr      : std::shared_ptr<Expr> left, Token Operator, std::shared_ptr<Expr> right",
+         "LiteralExpr     : TokenType type, std::string value",
+         "UnaryExpr       : Token Operator, std::shared_ptr<Expr> right",
+         "Variable        : Token name"},
         {},
         {{"CObject", "accept", "ExprVisitor"}}};
     AstGen exprGenerator(outDir, exprSpec);
@@ -199,14 +199,15 @@ int main(int argc, char **argv) {
 
     const AstSpecification stmtSpec = {
         "Stmt",
-        {"Block      : std::vector<std::shared_ptr<Stmt>> stmts",
+        {"Block  : std::vector<std::shared_ptr<Stmt>> stmts",
             "Expression : std::shared_ptr<Expr> expr",
             "Function   : Token name, std::vector<Token> params, std::vector<std::shared_ptr<Stmt>> body",
             "If         : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch, std::shared_ptr<Stmt> elseBranch",
             "Print      : std::shared_ptr<Expr> expr",
             "Return     : Token keyword, std::shared_ptr<Expr> value",
             "While      : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> body",
-            "Var        : Token name, std::shared_ptr<Expr> init"},
+            "Decl       : Token name, std::shared_ptr<Expr> init",
+            "Null       : Token loc"},
         {},
         {{"CObject", "accept", "StmtVisitor"}}};
     AstGen stmtGenerator(outDir, stmtSpec);

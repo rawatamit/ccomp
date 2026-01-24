@@ -14,10 +14,13 @@ Parser::Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler)
 
 std::shared_ptr<Stmt> Parser::declaration() {
   try {
-#if 0
-    if (match({TokenType::VAR})) {
+#if 1
+    if (match({TokenType::INT})) {
       return varDeclaration();
-    } else if (match({TokenType::FUN})) {
+    }
+#endif
+#if 0
+    else if (match({TokenType::FUN})) {
       return std::dynamic_pointer_cast<Stmt>(function());
     } else if (match({TokenType::CLASS})) {
       return classDecl();
@@ -61,6 +64,8 @@ std::shared_ptr<Function> Parser::function() {
 }
 
 std::shared_ptr<Stmt> Parser::varDeclaration() {
+  // declarations must start with type
+  match({TokenType::INT});
   Token name = consume(TokenType::IDENTIFIER, "Expected variable name.");
 
   std::shared_ptr<Expr> init = nullptr;
@@ -69,7 +74,7 @@ std::shared_ptr<Stmt> Parser::varDeclaration() {
   }
 
   consume(TokenType::SEMICOLON, "expect ';' in var init.");
-  return std::static_pointer_cast<Stmt>(std::make_shared<Var>(name, init));
+  return std::static_pointer_cast<Stmt>(std::make_shared<Decl>(name, init));
 }
 
 std::shared_ptr<Stmt> Parser::statement() {
@@ -84,13 +89,18 @@ std::shared_ptr<Stmt> Parser::statement() {
   case TokenType::FOR:
     match({TokenType::FOR});
     return forStatement();
+#endif
   case TokenType::LEFT_BRACE:
     match({TokenType::LEFT_BRACE});
     return blockStatement();
+#if 0
   case TokenType::IF:
     match({TokenType::IF});
     return ifStatement();
 #endif
+  case TokenType::SEMICOLON:
+    match({TokenType::SEMICOLON});
+    return std::make_shared<Null>(previous());
   case TokenType::RETURN:
     match({TokenType::RETURN});
     return returnStatement();
@@ -136,8 +146,8 @@ std::shared_ptr<Stmt> Parser::forStatement() {
 
   std::shared_ptr<Stmt> init = nullptr;
   switch (peek().type) {
-  case TokenType::VAR:
-    match({TokenType::VAR});
+  case TokenType::INT:
+    match({TokenType::INT});
     init = varDeclaration();
     break;
   case TokenType::SEMICOLON:
@@ -225,17 +235,11 @@ std::shared_ptr<Expr> Parser::expression() { return assignment(); }
 std::shared_ptr<Expr> Parser::assignment() {
   auto expr = logic_or();
 
-  if (match({TokenType::EQUAL})) {
+  while (match({TokenType::EQUAL})) {
     Token equals = previous();
     auto value = assignment();
-
-    if (auto var = std::dynamic_pointer_cast<Variable>(expr)) {
-      Token name = var->name;
-      return std::static_pointer_cast<Expr>(
-          std::make_shared<Assign>(name, value));
-    }
-
-    error(equals, "Invalid assignment target.");
+    expr = std::static_pointer_cast<Expr>(
+        std::make_shared<Assign>(expr, value));
   }
 
   return expr;

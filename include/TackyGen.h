@@ -33,7 +33,8 @@ private:
   std::any visitPrint(std::shared_ptr<Print> stmt) override;
   std::any visitReturn(std::shared_ptr<Return> Stmt) override;
   std::any visitWhile(std::shared_ptr<While> Stmt) override;
-  std::any visitVar(std::shared_ptr<Var> Stmt) override;
+  std::any visitDecl(std::shared_ptr<Decl> Stmt) override;
+  std::any visitNull(std::shared_ptr<Null> Stmt) override;
   std::any visitAssign(std::shared_ptr<Assign> expr) override;
   std::any visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) override;
   std::any visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) override;

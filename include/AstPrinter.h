@@ -79,12 +79,13 @@ public:
     putchar(')');
     return nullptr;
   }
-  std::any visitVar(std::shared_ptr<Var> Stmt) override {
+  std::any visitDecl(std::shared_ptr<Decl> Stmt) override {
     return parenthesizeE("var " + Stmt->name.lexeme, {Stmt->init});
   }
 
   std::any visitAssign(std::shared_ptr<Assign> expr) override {
-    return parenthesizeE("= " + expr->name.lexeme, {expr->value});
+    parenthesizeE("lvalue", {expr->lvalue});
+    return parenthesizeE("= ", {expr->value});
   }
   std::any visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) override {
     return parenthesizeE(expr->Operator.lexeme, {expr->left, expr->right});

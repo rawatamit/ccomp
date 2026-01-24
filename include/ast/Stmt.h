@@ -14,20 +14,22 @@ class If;
 class Print;
 class Return;
 class While;
-class Var;
+class Decl;
+class Null;
 class Expr;
 
 class StmtVisitor {
 public:
   virtual ~StmtVisitor() {}
-  virtual std::any     visitBlock      (std::shared_ptr<Block      > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitBlock  (std::shared_ptr<Block  > Stmt __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitExpression (std::shared_ptr<Expression > Stmt __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitFunction   (std::shared_ptr<Function   > Stmt __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitIf         (std::shared_ptr<If         > Stmt __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitPrint      (std::shared_ptr<Print      > Stmt __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitReturn     (std::shared_ptr<Return     > Stmt __attribute_maybe_unused__) { return nullptr; }
   virtual std::any     visitWhile      (std::shared_ptr<While      > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitVar        (std::shared_ptr<Var        > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitDecl       (std::shared_ptr<Decl       > Stmt __attribute_maybe_unused__) { return nullptr; }
+  virtual std::any     visitNull       (std::shared_ptr<Null       > Stmt __attribute_maybe_unused__) { return nullptr; }
 };
 
 class Stmt {
@@ -36,13 +38,13 @@ public:
   virtual std::any accept(StmtVisitor& visitor) = 0;
 };
 
-class Block       : public std::enable_shared_from_this<Block      >, public Stmt { 
+class Block   : public std::enable_shared_from_this<Block  >, public Stmt { 
 public: 
-  Block      (   std::vector<std::shared_ptr<Stmt>> stmts)  :
+  Block  (   std::vector<std::shared_ptr<Stmt>> stmts)  :
     stmts(stmts) {}
  std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Block      > p{shared_from_this()};
-    return visitor.visitBlock      (p);
+    std::shared_ptr<Block  > p{shared_from_this()};
+    return visitor.visitBlock  (p);
   }
 public: 
    std::vector<std::shared_ptr<Stmt>> stmts;
@@ -126,17 +128,29 @@ public:
    std::shared_ptr<Stmt> body;
 };
 
-class Var         : public std::enable_shared_from_this<Var        >, public Stmt { 
+class Decl        : public std::enable_shared_from_this<Decl       >, public Stmt { 
 public: 
-  Var        (   Token name,    std::shared_ptr<Expr> init)  :
+  Decl       (   Token name,    std::shared_ptr<Expr> init)  :
     name(name), init(init) {}
  std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Var        > p{shared_from_this()};
-    return visitor.visitVar        (p);
+    std::shared_ptr<Decl       > p{shared_from_this()};
+    return visitor.visitDecl       (p);
   }
 public: 
    Token name;
    std::shared_ptr<Expr> init;
+};
+
+class Null        : public std::enable_shared_from_this<Null       >, public Stmt { 
+public: 
+  Null       (   Token loc)  :
+    loc(loc) {}
+ std::any accept(StmtVisitor& visitor) override {
+    std::shared_ptr<Null       > p{shared_from_this()};
+    return visitor.visitNull       (p);
+  }
+public: 
+   Token loc;
 };
 
 } // end namespace

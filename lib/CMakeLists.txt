@@ -12,6 +12,7 @@ add_library(ccomplib
             Scanner.cc
             ErrorHandler.cc
             Parser.cc
+            Resolver.cc
             TackyGen.cc
             AsmGen.cc
             Codegen.cc
