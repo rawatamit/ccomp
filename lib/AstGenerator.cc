@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
          "BinaryExpr      : std::unique_ptr<Expr> left, Token Operator, std::unique_ptr<Expr> right",
          "LiteralExpr     : TokenType type, std::string value",
          "UnaryExpr       : Token Operator, std::unique_ptr<Expr> right",
-         "Variable        : Token name"},
+         "Variable        : Token name, int level"},
         {},
         {"\"Token.h\"", "<memory>", "<string>", "<variant>"}};
     AstGen exprGenerator(outDir, exprSpec);
@@ -195,7 +195,7 @@ int main(int argc, char **argv) {
             "If         : std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> thenBranch, std::unique_ptr<Stmt> elseBranch",
             "Return     : Token keyword, std::unique_ptr<Expr> value",
             "While      : std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> body",
-            "Decl       : Token name, std::unique_ptr<Expr> init",
+            "Decl       : std::unique_ptr<Expr> name, std::unique_ptr<Expr> init",
             "Null       : Token loc"},
         {},
         {"\"Token.h\"", "\"Expr.h\"", "<memory>", "<vector>", "<variant>"}};

@@ -73,10 +73,10 @@ public:
 
 class Decl {
 public: 
-  Decl(  Token name,   std::unique_ptr<Expr> init) :
-    name(name), init(std::move(init)) {}
+  Decl(  std::unique_ptr<Expr> name,   std::unique_ptr<Expr> init) :
+    name(std::move(name)), init(std::move(init)) {}
 public: 
-  Token name;
+  std::unique_ptr<Expr> name;
   std::unique_ptr<Expr> init;
 };
 

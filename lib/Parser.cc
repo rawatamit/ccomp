@@ -73,7 +73,8 @@ std::unique_ptr<Stmt> Parser::varDeclaration() {
   }
 
   consume(TokenType::SEMICOLON, "expect ';' in var init.");
-  return std::make_unique<Stmt>(Decl(name, std::move(init)));
+  return std::make_unique<Stmt>(
+    Decl(std::make_unique<Expr>(Variable(name, -1)), std::move(init)));
 }
 
 std::unique_ptr<Stmt> Parser::statement() {
@@ -374,7 +375,7 @@ std::unique_ptr<Expr> Parser::primary() {
     // return std::static_pointer_cast<Expr>(std::make_unique<GroupingExpr>(expr));
   }
   if (match({TokenType::IDENTIFIER})) {
-    return std::make_unique<Expr>(Variable(previous()));
+    return std::make_unique<Expr>(Variable(previous(), -1));
   }
   throw error(peek(), "Expected expression.");
   return nullptr;

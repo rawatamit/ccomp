@@ -21,9 +21,7 @@ std::shared_ptr<Asm> AsmGen::gen() {
 }
 
 std::shared_ptr<Asm> AsmGen::gen(Tacky* expr) {
-  auto inst = std::visit(*this, *expr);
-  //instructions_.emplace_back(inst);
-  return inst;
+  return std::visit(*this, *expr);
 }
 
 std::vector<std::shared_ptr<Asm>> AsmGen::gen(const std::vector<std::shared_ptr<Tacky>>& exprs) {

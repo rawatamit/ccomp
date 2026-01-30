@@ -1,4 +1,5 @@
 #include "Resolver.h"
+#include <cassert>
 
 using namespace ccomp;
 
@@ -16,20 +17,16 @@ void Resolver::resolve(Expr* expr) {
   std::visit(*this, *expr);
 }
 
-void Resolver::resolveDecls(const std::vector<std::unique_ptr<Decl>>&) {
-  //for (auto& decl : decls) {
-    //resolve(decl);
-  //}
-}
-
-void Resolver::resolveLocal(std::unique_ptr<Expr>, const Token &tok) {
-  for (int i = scopes_.size() - 1; i >= 0; --i) {
-    if (scopes_[i].find(tok.lexeme) != scopes_[i].end()) {
-      return;
+int Resolver::resolveLocal(const Token &tok) {
+  auto scopes_rend = scopes_.rend();
+  for (auto it = scopes_.rbegin(); it != scopes_rend; ++it) {
+    if (it->find(tok.lexeme) != it->end()) {
+      return std::distance(it, scopes_rend);
     }
   }
 
-  // not found, assume global
+  // TODO: not found, assume global?
+  return -1;
 }
 
 void Resolver::resolveFunction(const Function& fn,
@@ -47,7 +44,7 @@ void Resolver::resolveFunction(const Function& fn,
 }
 
 void Resolver::beginScope() {
-  scopes_.push_back(std::map<std::string, bool>());
+  scopes_.push_back(std::unordered_map<std::string, bool>());
 }
 
 void Resolver::endScope() {
@@ -153,11 +150,16 @@ void Resolver::operator()(const Return& ret) {
 void Resolver::operator()(const While&) {}
 
 void Resolver::operator()(const Decl& decl) {
-  declare(decl.name);
+  auto var = std::get_if<Variable>(decl.name.get());
+  assert(var != nullptr);
+  // Declare variable name, and set scope level on variable.
+  declare(var->name);
+  var->level = scopes_.size();
+
   if (decl.init != nullptr) {
     resolve(decl.init.get());
   }
-  define(decl.name);
+  define(var->name);
 }
 
 void Resolver::operator()(const Null&) {}
@@ -167,7 +169,6 @@ void Resolver::operator()(const Assign& assign) {
   resolve(lvalue.get());
   if (std::holds_alternative<Variable>(*lvalue)) {
     resolve(assign.value.get());
-    //resolveLocal(expr, expr->name);
   } else {
     // TODO: fix line number.
     errorHandler_.add(0, " at assign ",
@@ -193,7 +194,7 @@ void Resolver::operator()(const UnaryExpr& unary) {
   resolve(unary.right.get());
 }
 
-void Resolver::operator()(const Variable& var) {
+void Resolver::operator()(Variable& var) {
 #if 0
   if (!scopes_.empty()) {
     auto it = scopes_.back().find(var->name.lexeme);
@@ -204,11 +205,14 @@ void Resolver::operator()(const Variable& var) {
   }
 #endif
 
-  auto it = scopes_.back().find(var.name.lexeme);
-  if (it == scopes_.back().end()) {
-    errorHandler_.add(var.name.line, " at '" + var.name.lexeme + "'",
+  int level = resolveLocal(var.name);
+  if (level >= 0) {
+    // Set the scope level at which this variable is defined.
+    // This is used for uniquifying variable names in TackyGen.
+    var.level = level;
+  } else {
+    const auto& id = var.name.toString();
+    errorHandler_.add(var.name.line, " at '" + id + "'",
                       "Variable not defined before use.");
   }
-
-  //resolveLocal(var, var.name);
 }

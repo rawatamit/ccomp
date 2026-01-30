@@ -63,10 +63,11 @@ public:
 
 class Variable {
 public: 
-  Variable(  Token name) :
-    name(name) {}
+  Variable(  Token name,   int level) :
+    name(name), level(level) {}
 public: 
   Token name;
+  int level;
 };
 
 } // end namespace

@@ -6,11 +6,10 @@
 #include "ast/Expr.h"
 #include "ast/Stmt.h"
 
-#include <map>
 #include <vector>
+#include <unordered_map>
 
 namespace ccomp {
-
 class Resolver {
 private:
   enum FunctionType {
@@ -19,14 +18,14 @@ private:
     INITIALIZER,
   };
 
-  ErrorHandler &errorHandler_;
+  ErrorHandler& errorHandler_;
   FunctionType currentFunction_;
-  std::vector<std::map<std::string, bool>> scopes_;
+  std::vector<std::unordered_map<std::string, bool>> scopes_;
 
 public:
-  Resolver(ErrorHandler &errorHandler)
-      : errorHandler_(errorHandler),
-        currentFunction_(NONEF)
+  Resolver(ErrorHandler& errorHandler)
+    : errorHandler_(errorHandler),
+      currentFunction_(NONEF)
   {}
 
   ~Resolver() = default;
@@ -35,8 +34,7 @@ public:
 private:
   void resolve(Stmt* stmt);
   void resolve(Expr* expr);
-  void resolveDecls(const std::vector<std::unique_ptr<Decl>>& decls);
-  void resolveLocal(std::unique_ptr<Expr> expr, const Token& tok);
+  int resolveLocal(const Token& tok);
   void resolveFunction(const Function& fn, FunctionType type);
 
   void beginScope();
@@ -59,7 +57,7 @@ public:
   void operator()(const BinaryExpr& expr);
   void operator()(const LiteralExpr& expr);
   void operator()(const UnaryExpr& expr);
-  void operator()(const Variable& expr);
+  void operator()(Variable& expr);
 };
 
 } // namespace ccomp

@@ -121,7 +121,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const While& Stmt) {
 std::shared_ptr<Tacky> TackyGen::operator()(const Decl& decl) {
   if (auto& init = decl.init) {
     // lvalue is Var(v)
-    auto dst = make_tacky<TackyVar>(std::string(decl.name.lexeme));
+    auto dst = gen(decl.name.get());
     auto src = gen(init.get());
 
     // copy src to dst
@@ -299,5 +299,5 @@ std::shared_ptr<Tacky> TackyGen::operator()(const UnaryExpr& expr) {
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Variable& var) {
-  return make_tacky<TackyVar>(var.name.lexeme);
+  return make_tacky<TackyVar>(std::format("{}_scope_level{}", var.name.toString(), var.level));
 }
