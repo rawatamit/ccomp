@@ -12,12 +12,15 @@ Scanner::Scanner(const std::string &aSource, ErrorHandler &aErrorHandler)
   reservedKeywords["return"] = TokenType::RETURN;
   reservedKeywords["else"] = TokenType::ELSE;
   reservedKeywords["false"] = TokenType::FALSE;
-  reservedKeywords["for"] = TokenType::FOR;
   reservedKeywords["if"] = TokenType::IF;
   reservedKeywords["print"] = TokenType::PRINT;
   reservedKeywords["return"] = TokenType::RETURN;
   reservedKeywords["true"] = TokenType::TRUE;
+  reservedKeywords["for"] = TokenType::FOR;
   reservedKeywords["while"] = TokenType::WHILE;
+  reservedKeywords["do"] = TokenType::DO;
+  reservedKeywords["break"] = TokenType::BREAK;
+  reservedKeywords["continue"] = TokenType::CONTINUE;
 }
 
 char Scanner::advanceAndGetChar() {

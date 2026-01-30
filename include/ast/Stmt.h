@@ -13,10 +13,14 @@ class Expression;
 class Function;
 class If;
 class Return;
+class DoWhile;
 class While;
+class For;
 class Decl;
 class Null;
-using Stmt = std::variant<Block, Expression, Function, If, Return, While, Decl, Null>;
+class Break;
+class Continue;
+using Stmt = std::variant<Block, Expression, Function, If, Return, DoWhile, While, For, Decl, Null, Break, Continue>;
 class Block {
 public: 
   Block(  std::vector<std::unique_ptr<Stmt>> stmts) :
@@ -62,13 +66,36 @@ public:
   std::unique_ptr<Expr> value;
 };
 
+class DoWhile {
+public: 
+  DoWhile(  std::unique_ptr<Stmt> body,   std::unique_ptr<Expr> condition,   int loop_label) :
+    body(std::move(body)), condition(std::move(condition)), loop_label(loop_label) {}
+public: 
+  std::unique_ptr<Stmt> body;
+  std::unique_ptr<Expr> condition;
+  int loop_label;
+};
+
 class While {
 public: 
-  While(  std::unique_ptr<Expr> condition,   std::unique_ptr<Stmt> body) :
-    condition(std::move(condition)), body(std::move(body)) {}
+  While(  std::unique_ptr<Expr> condition,   std::unique_ptr<Stmt> body,   int loop_label) :
+    condition(std::move(condition)), body(std::move(body)), loop_label(loop_label) {}
 public: 
   std::unique_ptr<Expr> condition;
   std::unique_ptr<Stmt> body;
+  int loop_label;
+};
+
+class For {
+public: 
+  For(  std::unique_ptr<Stmt> init,   std::unique_ptr<Expr> condition,   std::unique_ptr<Expr> post,   std::unique_ptr<Stmt> body,   int loop_label) :
+    init(std::move(init)), condition(std::move(condition)), post(std::move(post)), body(std::move(body)), loop_label(loop_label) {}
+public: 
+  std::unique_ptr<Stmt> init;
+  std::unique_ptr<Expr> condition;
+  std::unique_ptr<Expr> post;
+  std::unique_ptr<Stmt> body;
+  int loop_label;
 };
 
 class Decl {
@@ -86,6 +113,24 @@ public:
     loc(loc) {}
 public: 
   Token loc;
+};
+
+class Break {
+public: 
+  Break(  Token loc,   int loop_label) :
+    loc(loc), loop_label(loop_label) {}
+public: 
+  Token loc;
+  int loop_label;
+};
+
+class Continue {
+public: 
+  Continue(  Token loc,   int loop_label) :
+    loc(loc), loop_label(loop_label) {}
+public: 
+  Token loc;
+  int loop_label;
 };
 
 } // end namespace

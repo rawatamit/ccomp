@@ -68,6 +68,19 @@ void Resolver::define(const Token &name) {
   }
 }
 
+void Resolver::beginLoop(int* label) {
+  nested_loop_labels_.push_back(loop_label_++);
+  copyLoopLabel(label);
+}
+
+void Resolver::endLoop() {
+  nested_loop_labels_.pop_back();
+}
+
+void Resolver::copyLoopLabel(int* label) {
+  *label = nested_loop_labels_.back();
+}
+
 #if 0
 void
 Resolver::visitClass(std::unique_ptr<Class> klass) {
@@ -147,7 +160,39 @@ void Resolver::operator()(const Return& ret) {
   }
 }
 
-void Resolver::operator()(const While&) {}
+void Resolver::operator()(DoWhile& loop) {
+  beginLoop(&loop.loop_label);
+  resolve(loop.body.get());
+  resolve(loop.condition.get());
+  endLoop();
+}
+
+void Resolver::operator()(While& loop) {
+  beginLoop(&loop.loop_label);
+  resolve(loop.condition.get());
+  resolve(loop.body.get());
+  endLoop();
+}
+
+void Resolver::operator()(For& loop) {
+  beginLoop(&loop.loop_label);
+  beginScope();
+  if (loop.init) {
+    resolve(loop.init.get());
+  }
+
+  if (loop.condition) {
+    resolve(loop.condition.get());
+  }
+
+  if (loop.post) {
+    resolve(loop.post.get());
+  }
+
+  resolve(loop.body.get());
+  endScope();
+  endLoop();
+}
 
 void Resolver::operator()(const Decl& decl) {
   auto var = std::get_if<Variable>(decl.name.get());
@@ -162,7 +207,26 @@ void Resolver::operator()(const Decl& decl) {
   define(var->name);
 }
 
-void Resolver::operator()(const Null&) {}
+void Resolver::operator()(const Null&)
+{}
+
+void Resolver::operator()(Break& flow) {
+  if (!nested_loop_labels_.empty()) {
+    copyLoopLabel(&flow.loop_label);
+  } else {
+    errorHandler_.add(flow.loc.line, " at 'break'",
+                      "break must be inside a loop or switch.");
+  }
+}
+
+void Resolver::operator()(Continue& flow) {
+  if (!nested_loop_labels_.empty()) {
+    copyLoopLabel(&flow.loop_label);
+  } else {
+    errorHandler_.add(flow.loc.line, " at 'continue'",
+                      "break must be inside a loop or switch.");
+  }
+}
 
 void Resolver::operator()(const Assign& assign) {
   auto& lvalue = assign.lvalue;

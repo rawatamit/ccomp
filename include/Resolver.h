@@ -21,11 +21,14 @@ private:
   ErrorHandler& errorHandler_;
   FunctionType currentFunction_;
   std::vector<std::unordered_map<std::string, bool>> scopes_;
+  std::vector<int> nested_loop_labels_;
+  int loop_label_;
 
 public:
   Resolver(ErrorHandler& errorHandler)
     : errorHandler_(errorHandler),
-      currentFunction_(NONEF)
+      currentFunction_(NONEF),
+      loop_label_(0)
   {}
 
   ~Resolver() = default;
@@ -42,15 +45,23 @@ private:
   void declare(const Token &tok);
   void define(const Token &name);
 
+  void beginLoop(int* label);
+  void endLoop();
+  void copyLoopLabel(int* label);
+
 public:
   void operator()(const Block& stmt);
   void operator()(const Expression& stmt);
   void operator()(const Function& stmt);
   void operator()(const If& stmt);
   void operator()(const Return& stmt);
-  void operator()(const While& stmt);
+  void operator()(DoWhile& Stmt);
+  void operator()(While& stmt);
+  void operator()(For& Stmt);
   void operator()(const Decl& stmt);
   void operator()(const Null& stmt);
+  void operator()(Break& stmt);
+  void operator()(Continue& stmt);
 
   void operator()(const Assign& expr);
   void operator()(const Conditional& expr);

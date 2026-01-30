@@ -79,17 +79,23 @@ std::unique_ptr<Stmt> Parser::varDeclaration() {
 
 std::unique_ptr<Stmt> Parser::statement() {
   switch (peek().type) {
-#if 0
-  case TokenType::PRINT:
-    match({TokenType::PRINT});
-    return printStatement();
   case TokenType::WHILE:
     match({TokenType::WHILE});
     return whileStatement();
+  case TokenType::DO:
+    match({TokenType::DO});
+    return doWhileStatement();
   case TokenType::FOR:
     match({TokenType::FOR});
     return forStatement();
-#endif
+  case TokenType::BREAK:
+    match({TokenType::BREAK});
+    consume(TokenType::SEMICOLON, "Expected ';' after break.");
+    return std::make_unique<Stmt>(Break(previous(), -1));
+  case TokenType::CONTINUE:
+    match({TokenType::CONTINUE});
+    consume(TokenType::SEMICOLON, "Expected ';' after continue.");
+    return std::make_unique<Stmt>(Continue(previous(), -1));
   case TokenType::LEFT_BRACE:
     match({TokenType::LEFT_BRACE});
     return std::make_unique<Stmt>(blockStatement());
@@ -129,12 +135,29 @@ std::unique_ptr<Stmt> Parser::whileStatement() {
   consume(TokenType::RIGHT_PAREN, "need ')' in condition for while");
 
   auto body = statement();
-  return std::make_unique<Stmt>(While(std::move(condition), std::move(body)));
+  return std::make_unique<Stmt>(While(std::move(condition), std::move(body), -1));
+}
+
+std::unique_ptr<Stmt> Parser::doWhileStatement() {
+  // do
+  //  statement
+  // while (condition);
+  auto body = statement();
+  consume(TokenType::WHILE, "Expected while in do ... while");
+  consume(TokenType::LEFT_PAREN, "Expected '(' in condition for while");
+  auto condition = expression();
+  consume(TokenType::RIGHT_PAREN, "Expected ')' in condition for while");
+  consume(TokenType::SEMICOLON, "Expected ';' after do .. while");
+
+  return std::make_unique<Stmt>(DoWhile(std::move(body), std::move(condition), -1));
 }
 
 std::unique_ptr<Stmt> Parser::forStatement() {
+  // for (init; condition; post)
+  //   body
   consume(TokenType::LEFT_PAREN, "Expected '(' after for");
 
+  // init can be a declaration or statment
   std::unique_ptr<Stmt> init = nullptr;
   switch (peek().type) {
   case TokenType::INT:
@@ -149,44 +172,22 @@ std::unique_ptr<Stmt> Parser::forStatement() {
     break;
   }
 
+  // condition can be missing. if missing, it should default to true.
   std::unique_ptr<Expr> condition = nullptr;
   if (!check(TokenType::SEMICOLON)) {
     condition = expression();
   }
   consume(TokenType::SEMICOLON, "Expected ';' after condition");
 
-  std::unique_ptr<Expr> step = nullptr;
+  // post expression
+  std::unique_ptr<Expr> post = nullptr;
   if (!check(TokenType::RIGHT_PAREN)) {
-    step = expression();
+    post = expression();
   }
   consume(TokenType::RIGHT_PAREN, "Expected ')' after update");
 
   auto body = statement();
-
-  // init
-  // while (condition)
-  //   body
-  //   step
-  if (step != nullptr) {
-    std::vector<std::unique_ptr<Stmt>> v;
-    v.push_back(std::move(body));
-    v.push_back(std::make_unique<Stmt>(Expression(std::move(step))));
-    body = std::make_unique<Stmt>(Block(std::move(v)));
-  }
-
-  if (condition == nullptr) {
-    condition = std::make_unique<Expr>(LiteralExpr(TokenType::TRUE, "true"));
-  }
-
-  body = std::make_unique<Stmt>(While(std::move(condition), std::move(body)));
-
-  if (init != nullptr) {
-    std::vector<std::unique_ptr<Stmt>> v;
-    v.push_back(std::move(init));
-    v.push_back(std::move(body));
-    body = std::make_unique<Stmt>(Block(std::move(v)));
-  }
-
+  body = std::make_unique<Stmt>(For(std::move(init), std::move(condition), std::move(post), std::move(body), -1));
   return body;
 }
 
@@ -444,7 +445,6 @@ void Parser::synchronize() {
 
     switch (peek().type) {
     case TokenType::CLASS:
-    case TokenType::VAR:
     case TokenType::FOR:
     case TokenType::IF:
     case TokenType::WHILE:

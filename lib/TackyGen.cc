@@ -48,6 +48,14 @@ std::string TackyGen::unique_label(const std::string& desc) {
   return std::format("T{}.{}", desc, nextId++);
 }
 
+std::string TackyGen::break_label(int loop_label) {
+  return std::format("break_loop{}", loop_label);
+}
+
+std::string TackyGen::continue_label(int loop_label) {
+  return std::format("continue_loop{}", loop_label);
+}
+
 std::shared_ptr<Tacky> TackyGen::operator()(const Block& stmt) {
   gen(stmt.stmts);
   return nullptr;
@@ -112,9 +120,97 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Return& ret) {
   return nullptr;
 }
 
-std::shared_ptr<Tacky> TackyGen::operator()(const While& Stmt) {
-  gen(Stmt.condition.get());
-  gen(Stmt.body.get());
+std::shared_ptr<Tacky> TackyGen::operator()(const DoWhile& loop) {
+  // Label(start)
+  auto loop_begin = make_tacky<TackyLabel>(unique_label("do_while"));
+  instructions_.emplace_back(loop_begin);
+
+  // <instructions for body>
+  gen(loop.body.get());
+
+  // Label(continue_label)
+  instructions_.emplace_back(
+    make_tacky<TackyLabel>(continue_label(loop.loop_label)));
+
+  // <instructions for condition>
+  // v = <result of condition>
+  auto res = gen(loop.condition.get());
+
+  // JumpIfNotZero(v, start)
+  instructions_.emplace_back(make_tacky<TackyJumpIfNotZero>(res, loop_begin));
+
+  // Label(break_label)
+  instructions_.emplace_back(
+    make_tacky<TackyLabel>(break_label(loop.loop_label)));
+  return nullptr;
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const While& loop) {
+  // Label(start|continue_label)
+  auto loop_begin =
+    make_tacky<TackyLabel>(continue_label(loop.loop_label));
+  instructions_.emplace_back(loop_begin);
+
+  // <instructions for condition>
+  // v = <result of condition>
+  auto res = gen(loop.condition.get());
+
+  // JumpIfZero(v, end|break)
+  auto end_label =
+    make_tacky<TackyLabel>(break_label(loop.loop_label));
+  instructions_.emplace_back(make_tacky<TackyJumpIfZero>(res, end_label));
+
+  // <instructions for body>
+  gen(loop.body.get());
+
+  // Jump(continue_label)
+  instructions_.emplace_back(make_tacky<TackyJump>(loop_begin));
+
+  // Label(break_label|end_label)
+  instructions_.emplace_back(end_label);
+  return nullptr;
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const For& loop) {
+  // <instructions for init>
+  if (loop.init) {
+    gen(loop.init.get());
+  }
+
+  // Label(start)
+  auto loop_begin = make_tacky<TackyLabel>(unique_label("forloop"));
+  instructions_.emplace_back(loop_begin);
+
+  auto end_label =
+    make_tacky<TackyLabel>(break_label(loop.loop_label));
+
+  // <instructions for condition>
+  // v = <result of condition>
+  if (loop.condition) {
+    auto res = gen(loop.condition.get());
+
+    // JumpIfZero(v, end|break)
+    instructions_.emplace_back(make_tacky<TackyJumpIfZero>(res, end_label));
+  }
+
+  // <instructions for body>
+  gen(loop.body.get());
+
+  // Label(continue_label)
+  auto cont_label =
+    make_tacky<TackyLabel>(continue_label(loop.loop_label));
+  instructions_.emplace_back(cont_label);
+
+  // <instructions for post>
+  if (loop.post) {
+    gen(loop.post.get());
+  }
+
+  // Jump(start)
+  instructions_.emplace_back(make_tacky<TackyJump>(loop_begin));
+
+  // Label(end|break_label)
+  instructions_.emplace_back(end_label);
   return nullptr;
 }
 
@@ -145,6 +241,18 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Assign& expr) {
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Null&) {
+  return nullptr;
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const Break& flow) {
+  instructions_.emplace_back(make_tacky<TackyJump>(
+    make_tacky<TackyLabel>(break_label(flow.loop_label))));
+  return nullptr;
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const Continue& flow) {
+  instructions_.emplace_back(make_tacky<TackyJump>(
+    make_tacky<TackyLabel>(continue_label(flow.loop_label))));
   return nullptr;
 }
 

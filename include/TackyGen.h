@@ -24,6 +24,8 @@ private:
   std::shared_ptr<Tacky> genLogical(const BinaryExpr& expr);
   std::string unique_var();
   std::string unique_label(const std::string& desc);
+  std::string break_label(int loop_label);
+  std::string continue_label(int loop_label);
 
   template<typename T, typename... Args>
   std::shared_ptr<Tacky> make_tacky(Args&&... args)
@@ -35,10 +37,14 @@ public:
   std::shared_ptr<Tacky> operator()(const Function& stmt);
   std::shared_ptr<Tacky> operator()(const If& stmt);
   std::shared_ptr<Tacky> operator()(const Return& Stmt);
+  std::shared_ptr<Tacky> operator()(const DoWhile& Stmt);
   std::shared_ptr<Tacky> operator()(const While& Stmt);
+  std::shared_ptr<Tacky> operator()(const For& Stmt);
   std::shared_ptr<Tacky> operator()(const Decl& Stmt);
-  std::shared_ptr<Tacky> operator()(const Assign& expr);
-  std::shared_ptr<Tacky> operator()(const Null& expr);
+  std::shared_ptr<Tacky> operator()(const Assign& stmt);
+  std::shared_ptr<Tacky> operator()(const Null& stmt);
+  std::shared_ptr<Tacky> operator()(const Break& stmt);
+  std::shared_ptr<Tacky> operator()(const Continue& stmt);
 
   std::shared_ptr<Tacky> operator()(const Conditional& expr);
   std::shared_ptr<Tacky> operator()(const BinaryExpr& expr);

@@ -194,9 +194,13 @@ int main(int argc, char **argv) {
             "Function   : Token name, std::vector<Token> params, std::vector<std::unique_ptr<Stmt>> body",
             "If         : std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> thenBranch, std::unique_ptr<Stmt> elseBranch",
             "Return     : Token keyword, std::unique_ptr<Expr> value",
-            "While      : std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> body",
+            "DoWhile    : std::unique_ptr<Stmt> body, std::unique_ptr<Expr> condition, int loop_label",
+            "While      : std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> body, int loop_label",
+            "For        : std::unique_ptr<Stmt> init, std::unique_ptr<Expr> condition, std::unique_ptr<Expr> post, std::unique_ptr<Stmt> body, int loop_label",
             "Decl       : std::unique_ptr<Expr> name, std::unique_ptr<Expr> init",
-            "Null       : Token loc"},
+            "Null       : Token loc",
+            "Break     : Token loc, int loop_label",
+            "Continue  : Token loc, int loop_label"},
         {},
         {"\"Token.h\"", "\"Expr.h\"", "<memory>", "<vector>", "<variant>"}};
     AstGen stmtGenerator(outDir, stmtSpec);
