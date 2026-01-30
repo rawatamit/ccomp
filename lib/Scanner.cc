@@ -13,9 +13,7 @@ Scanner::Scanner(const std::string &aSource, ErrorHandler &aErrorHandler)
   reservedKeywords["else"] = TokenType::ELSE;
   reservedKeywords["false"] = TokenType::FALSE;
   reservedKeywords["for"] = TokenType::FOR;
-  reservedKeywords["fun"] = TokenType::FUN;
   reservedKeywords["if"] = TokenType::IF;
-  reservedKeywords["nil"] = TokenType::NIL;
   reservedKeywords["print"] = TokenType::PRINT;
   reservedKeywords["return"] = TokenType::RETURN;
   reservedKeywords["true"] = TokenType::TRUE;
@@ -74,6 +72,12 @@ void Scanner::scanAndAddToken() {
     break;
   case '~':
     addToken(TokenType::TILDE);
+    break;
+  case '?':
+    addToken(TokenType::QUESTION_MARK);
+    break;
+  case ':':
+    addToken(TokenType::COLON);
     break;
   case '-':
     addToken(matchAndAdvance('-') ? TokenType::MINUS_MINUS : TokenType::MINUS);

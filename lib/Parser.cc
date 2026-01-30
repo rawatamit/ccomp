@@ -12,7 +12,7 @@ ParseError::ParseError(std::string msg, Token token)
 Parser::Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler)
     : current(0), tokens_(tokens), errorHandler_(errorHandler) {}
 
-std::shared_ptr<Stmt> Parser::declaration() {
+std::unique_ptr<Stmt> Parser::declaration() {
   try {
 #if 1
     if (match({TokenType::INT})) {
@@ -36,7 +36,7 @@ std::shared_ptr<Stmt> Parser::declaration() {
   }
 }
 
-std::shared_ptr<Function> Parser::function() {
+Function Parser::function() {
   Token returnType = consume(TokenType::INT, "Expected return type.");
   Token name = consume(TokenType::IDENTIFIER, "Expected function name.");
 
@@ -58,26 +58,25 @@ std::shared_ptr<Function> Parser::function() {
   consume(TokenType::RIGHT_PAREN, "Expected ')' after parameters.");
 
   consume(TokenType::LEFT_BRACE, "Expected '{' before function body.");
-  std::shared_ptr<Block> body =
-      std::static_pointer_cast<Block>(blockStatement());
-  return std::make_shared<Function>(name, params, body->stmts);
+  auto body = blockStatement();
+  return Function(name, params, std::move(body.stmts));
 }
 
-std::shared_ptr<Stmt> Parser::varDeclaration() {
+std::unique_ptr<Stmt> Parser::varDeclaration() {
   // declarations must start with type
   match({TokenType::INT});
   Token name = consume(TokenType::IDENTIFIER, "Expected variable name.");
 
-  std::shared_ptr<Expr> init = nullptr;
+  std::unique_ptr<Expr> init;
   if (match({TokenType::EQUAL})) {
     init = expression();
   }
 
   consume(TokenType::SEMICOLON, "expect ';' in var init.");
-  return std::static_pointer_cast<Stmt>(std::make_shared<Decl>(name, init));
+  return std::make_unique<Stmt>(Decl(name, std::move(init)));
 }
 
-std::shared_ptr<Stmt> Parser::statement() {
+std::unique_ptr<Stmt> Parser::statement() {
   switch (peek().type) {
 #if 0
   case TokenType::PRINT:
@@ -92,15 +91,13 @@ std::shared_ptr<Stmt> Parser::statement() {
 #endif
   case TokenType::LEFT_BRACE:
     match({TokenType::LEFT_BRACE});
-    return blockStatement();
-#if 0
+    return std::make_unique<Stmt>(blockStatement());
   case TokenType::IF:
     match({TokenType::IF});
     return ifStatement();
-#endif
   case TokenType::SEMICOLON:
     match({TokenType::SEMICOLON});
-    return std::make_shared<Null>(previous());
+    return std::make_unique<Stmt>(Null(previous()));
   case TokenType::RETURN:
     match({TokenType::RETURN});
     return returnStatement();
@@ -109,42 +106,35 @@ std::shared_ptr<Stmt> Parser::statement() {
   }
 }
 
-std::shared_ptr<Stmt> Parser::ifStatement() {
+std::unique_ptr<Stmt> Parser::ifStatement() {
   consume(TokenType::LEFT_PAREN, "need '(' in condition for if");
   auto condition = expression();
   consume(TokenType::RIGHT_PAREN, "need ')' in condition for if");
 
-  std::shared_ptr<Stmt> thenBranch = statement();
-  std::shared_ptr<Stmt> elseBranch = nullptr;
+  std::unique_ptr<Stmt> thenBranch = statement();
+  std::unique_ptr<Stmt> elseBranch;
 
   if (match({TokenType::ELSE})) {
     elseBranch = statement();
   }
 
-  return std::static_pointer_cast<Stmt>(
-      std::make_shared<If>(condition, thenBranch, elseBranch));
+  //return std::make_unique<Stmt>(If(std::move(condition), std::move(thenBranch), std::move(elseBranch)));
+  return std::make_unique<Stmt>(If(std::move(condition), std::move(thenBranch), std::move(elseBranch)));
 }
 
-std::shared_ptr<Stmt> Parser::printStatement() {
-  auto val = expression();
-  consume(TokenType::SEMICOLON, "Expected ';' after print.");
-  return std::static_pointer_cast<Stmt>(std::make_shared<Print>(val));
-}
-
-std::shared_ptr<Stmt> Parser::whileStatement() {
+std::unique_ptr<Stmt> Parser::whileStatement() {
   consume(TokenType::LEFT_PAREN, "need '(' in condition for while");
   auto condition = expression();
   consume(TokenType::RIGHT_PAREN, "need ')' in condition for while");
 
   auto body = statement();
-  return std::static_pointer_cast<Stmt>(
-      std::make_shared<While>(condition, body));
+  return std::make_unique<Stmt>(While(std::move(condition), std::move(body)));
 }
 
-std::shared_ptr<Stmt> Parser::forStatement() {
+std::unique_ptr<Stmt> Parser::forStatement() {
   consume(TokenType::LEFT_PAREN, "Expected '(' after for");
 
-  std::shared_ptr<Stmt> init = nullptr;
+  std::unique_ptr<Stmt> init = nullptr;
   switch (peek().type) {
   case TokenType::INT:
     match({TokenType::INT});
@@ -158,13 +148,13 @@ std::shared_ptr<Stmt> Parser::forStatement() {
     break;
   }
 
-  std::shared_ptr<Expr> condition = nullptr;
+  std::unique_ptr<Expr> condition = nullptr;
   if (!check(TokenType::SEMICOLON)) {
     condition = expression();
   }
   consume(TokenType::SEMICOLON, "Expected ';' after condition");
 
-  std::shared_ptr<Expr> step = nullptr;
+  std::unique_ptr<Expr> step = nullptr;
   if (!check(TokenType::RIGHT_PAREN)) {
     step = expression();
   }
@@ -177,169 +167,174 @@ std::shared_ptr<Stmt> Parser::forStatement() {
   //   body
   //   step
   if (step != nullptr) {
-    std::vector<std::shared_ptr<Stmt>> v;
-    v.push_back(body);
-    v.push_back(
-        std::static_pointer_cast<Stmt>(std::make_shared<Expression>(step)));
-    body = std::static_pointer_cast<Stmt>(std::make_shared<Block>(v));
+    std::vector<std::unique_ptr<Stmt>> v;
+    v.push_back(std::move(body));
+    v.push_back(std::make_unique<Stmt>(Expression(std::move(step))));
+    body = std::make_unique<Stmt>(Block(std::move(v)));
   }
 
   if (condition == nullptr) {
-    condition = std::static_pointer_cast<Expr>(
-        std::make_shared<LiteralExpr>(TokenType::TRUE, "true"));
+    condition = std::make_unique<Expr>(LiteralExpr(TokenType::TRUE, "true"));
   }
 
-  body =
-      std::static_pointer_cast<Stmt>(std::make_shared<While>(condition, body));
+  body = std::make_unique<Stmt>(While(std::move(condition), std::move(body)));
 
   if (init != nullptr) {
-    std::vector<std::shared_ptr<Stmt>> v;
-    v.push_back(init);
-    v.push_back(body);
-    body = std::static_pointer_cast<Stmt>(std::make_shared<Block>(v));
+    std::vector<std::unique_ptr<Stmt>> v;
+    v.push_back(std::move(init));
+    v.push_back(std::move(body));
+    body = std::make_unique<Stmt>(Block(std::move(v)));
   }
 
   return body;
 }
 
-std::shared_ptr<Stmt> Parser::blockStatement() {
-  std::vector<std::shared_ptr<Stmt>> stmts;
+Block Parser::blockStatement() {
+  std::vector<std::unique_ptr<Stmt>> stmts;
 
   while (!check(TokenType::RIGHT_BRACE) and !isAtEnd()) {
     stmts.push_back(declaration());
   }
 
   consume(TokenType::RIGHT_BRACE, "Expected '}' after block");
-  return std::static_pointer_cast<Stmt>(std::make_shared<Block>(stmts));
+  return Block(std::move(stmts));
 }
 
-std::shared_ptr<Stmt> Parser::expressionStatement() {
+std::unique_ptr<Stmt> Parser::expressionStatement() {
   auto val = expression();
   consume(TokenType::SEMICOLON, "Expected ';' after expression.");
-  return std::static_pointer_cast<Stmt>(std::make_shared<Expression>(val));
+  return std::make_unique<Stmt>(Expression(std::move(val)));
 }
 
-std::shared_ptr<Stmt> Parser::returnStatement() {
+std::unique_ptr<Stmt> Parser::returnStatement() {
   Token keyword = previous();
-  std::shared_ptr<Expr> expr = nullptr;
+  std::unique_ptr<Expr> expr = nullptr;
   if (!check(TokenType::SEMICOLON)) {
     expr = expression();
   }
   consume(TokenType::SEMICOLON, "Expected ';' after return.");
-  return std::static_pointer_cast<Stmt>(
-      std::make_shared<Return>(keyword, expr));
+  return std::make_unique<Stmt>(Return(keyword, std::move(expr)));
 }
 
-std::shared_ptr<Expr> Parser::expression() { return assignment(); }
+std::unique_ptr<Expr> Parser::expression() { return assignment(); }
 
-std::shared_ptr<Expr> Parser::assignment() {
-  auto expr = logic_or();
+std::unique_ptr<Expr> Parser::assignment() {
+  auto expr = conditional_ternary();
 
   while (match({TokenType::EQUAL})) {
     Token equals = previous();
     auto value = assignment();
-    expr = std::static_pointer_cast<Expr>(
-        std::make_shared<Assign>(expr, value));
+    expr = std::make_unique<Expr>(Assign(std::move(expr), std::move(value)));
   }
 
   return expr;
 }
 
-std::shared_ptr<Expr> Parser::logic_or() {
+std::unique_ptr<Expr> Parser::conditional_ternary() {
+  auto expr = logic_or();
+
+  while (match({TokenType::QUESTION_MARK})) {
+    Token question_mark = previous();
+    auto thenExp = expression();
+    if (match({TokenType::COLON})) {
+      auto elseExp = conditional_ternary();
+      expr = std::make_unique<Expr>(Conditional(std::move(expr), std::move(thenExp), std::move(elseExp)));
+    } else {
+      error(question_mark, "Expected : after ? in conditional ternary.");
+    }
+  }
+
+  return expr;
+}
+
+std::unique_ptr<Expr> Parser::logic_or() {
   auto expr = logic_and();
 
   while (match({TokenType::PIPE_PIPE})) {
     Token op = previous();
     auto rhs = logic_and();
-    expr = std::static_pointer_cast<Expr>(
-        std::make_shared<BinaryExpr>(expr, op, rhs));
+    expr = std::make_unique<Expr>(BinaryExpr(std::move(expr), std::move(op), std::move(rhs)));
   }
 
   return expr;
 }
 
-std::shared_ptr<Expr> Parser::logic_and() {
+std::unique_ptr<Expr> Parser::logic_and() {
   auto expr = equality();
 
   while (match({TokenType::AMPERSAND_AMPERSAND})) {
     Token op = previous();
     auto rhs = equality();
-    expr = std::static_pointer_cast<Expr>(
-        std::make_shared<BinaryExpr>(expr, op, rhs));
+    expr = std::make_unique<Expr>(BinaryExpr(std::move(expr), op, std::move(rhs)));
   }
 
   return expr;
 }
 
-std::shared_ptr<Expr> Parser::equality() {
+std::unique_ptr<Expr> Parser::equality() {
   auto expr = comparison();
   while (match({TokenType::BANG_EQUAL, TokenType::EQUAL_EQUAL})) {
     Token Operator = previous();
     auto right = comparison();
-    expr = std::static_pointer_cast<Expr>(
-        std::make_shared<BinaryExpr>(expr, Operator, right));
+    expr = std::make_unique<Expr>(BinaryExpr(std::move(expr), Operator, std::move(right)));
   }
   return expr;
 }
 
-std::shared_ptr<Expr> Parser::comparison() {
+std::unique_ptr<Expr> Parser::comparison() {
   auto expr = term();
   while (match({TokenType::GREATER, TokenType::LESS, TokenType::LESS_EQUAL,
                 TokenType::GREATER_EQUAL})) {
     Token Operator = previous();
     auto right = term();
-    expr = std::static_pointer_cast<Expr>(
-        std::make_shared<BinaryExpr>(expr, Operator, right));
+    expr = std::make_unique<Expr>(BinaryExpr(std::move(expr), Operator, std::move(right)));
   }
   return expr;
 }
 
-std::shared_ptr<Expr> Parser::term() {
+std::unique_ptr<Expr> Parser::term() {
   auto expr = factor();
   while (match({TokenType::MINUS, TokenType::PLUS})) {
     Token Operator = previous();
     auto right = factor();
-    expr = std::static_pointer_cast<Expr>(
-        std::make_shared<BinaryExpr>(expr, Operator, right));
+    expr = std::make_unique<Expr>(BinaryExpr(std::move(expr), Operator, std::move(right)));
   }
   return expr;
 }
 
-std::shared_ptr<Expr> Parser::factor() {
+std::unique_ptr<Expr> Parser::factor() {
   auto expr = unary();
   while (match({TokenType::SLASH, TokenType::STAR, TokenType::PERCENT})) {
     Token Operator = previous();
     auto right = unary();
-    expr = std::static_pointer_cast<Expr>(
-        std::make_shared<BinaryExpr>(expr, Operator, right));
+    expr = std::make_unique<Expr>(BinaryExpr(std::move(expr), Operator, std::move(right)));
   }
   return expr;
 }
 
-std::shared_ptr<Expr> Parser::unary() {
+std::unique_ptr<Expr> Parser::unary() {
   if (match({TokenType::TILDE, TokenType::BANG, TokenType::MINUS})) {
     Token Operator = previous();
     auto right = unary();
-    return std::static_pointer_cast<Expr>(
-        std::make_shared<UnaryExpr>(Operator, right));
+    return std::make_unique<Expr>(UnaryExpr(Operator, std::move(right)));
   }
   return call();
 }
 
-std::shared_ptr<Expr> Parser::call() {
+std::unique_ptr<Expr> Parser::call() {
   auto e = primary();
 
   while (true) {
     if (match({TokenType::LEFT_PAREN})) {
       // function call must begin with an identifier
-      if (auto le = std::dynamic_pointer_cast<LiteralExpr>(e)) {
+      if (!std::holds_alternative<Variable>(*e)) {
         throw error(previous(), "Expected identifier in call expression.");
       }
-      e = finishCall(e);
+      e = finishCall(std::move(e));
     } else if (match({TokenType::DOT})) {
       Token name =
           consume(TokenType::IDENTIFIER, "Expected property name after '.'.");
-      // e = std::static_pointer_cast<Expr>(std::make_shared<Get>(e, name));
+      // e = std::static_pointer_cast<Expr>(std::make_unique<Get>(e, name));
     } else {
       break;
     }
@@ -348,8 +343,8 @@ std::shared_ptr<Expr> Parser::call() {
   return e;
 }
 
-std::shared_ptr<Expr> Parser::finishCall(std::shared_ptr<Expr> e __attribute_maybe_unused__) {
-  std::vector<std::shared_ptr<Expr>> args;
+std::unique_ptr<Expr> Parser::finishCall(std::unique_ptr<Expr>) {
+  std::vector<std::unique_ptr<Expr>> args;
   if (!check(TokenType::RIGHT_PAREN)) {
     do {
       if (args.size() >= 255) {
@@ -362,37 +357,35 @@ std::shared_ptr<Expr> Parser::finishCall(std::shared_ptr<Expr> e __attribute_may
 
   Token paren = consume(TokenType::RIGHT_PAREN, "expected ')' in call");
   return nullptr;
-  // return std::static_pointer_cast<Expr>(std::make_shared<Call>(e, paren, args));
+  // return std::static_pointer_cast<Expr>(std::make_unique<Call>(e, paren, args));
 }
 
-std::shared_ptr<Expr> Parser::primary() {
+std::unique_ptr<Expr> Parser::primary() {
   if (match({TokenType::FALSE}))
-    return std::make_shared<LiteralExpr>(TokenType::FALSE, "false");
+    return std::make_unique<Expr>(LiteralExpr(TokenType::FALSE, "false"));
   if (match({TokenType::TRUE}))
-    return std::make_shared<LiteralExpr>(TokenType::TRUE, "true");
-  if (match({TokenType::NIL}))
-    return std::make_shared<LiteralExpr>(TokenType::NIL, "nil");
+    return std::make_unique<Expr>(LiteralExpr(TokenType::TRUE, "true"));
   if (match({TokenType::NUMBER, TokenType::STRING}))
-    return std::make_shared<LiteralExpr>(previous().type, previous().literal);
+    return std::make_unique<Expr>(LiteralExpr(previous().type, previous().literal));
   if (match({TokenType::LEFT_PAREN})) {
     auto expr = expression();
     consume(TokenType::RIGHT_PAREN, "Expected ')' after expression.");
     return expr;
-    // return std::static_pointer_cast<Expr>(std::make_shared<GroupingExpr>(expr));
+    // return std::static_pointer_cast<Expr>(std::make_unique<GroupingExpr>(expr));
   }
   if (match({TokenType::IDENTIFIER})) {
-    return std::make_shared<Variable>(previous());
+    return std::make_unique<Expr>(Variable(previous()));
   }
   throw error(peek(), "Expected expression.");
   return nullptr;
 }
 
-std::vector<std::shared_ptr<Stmt>> Parser::parse() {
-  std::vector<std::shared_ptr<Stmt>> stmts;
+std::vector<std::unique_ptr<Stmt>> Parser::parse() {
+  std::vector<std::unique_ptr<Stmt>> stmts;
 
   while (!isAtEnd()) {
     //stmts.push_back(declaration());
-    stmts.push_back(function());
+    stmts.push_back(std::make_unique<Stmt>(function()));
   }
 
   return stmts;
@@ -450,7 +443,6 @@ void Parser::synchronize() {
 
     switch (peek().type) {
     case TokenType::CLASS:
-    case TokenType::FUN:
     case TokenType::VAR:
     case TokenType::FOR:
     case TokenType::IF:

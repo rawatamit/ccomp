@@ -7,39 +7,44 @@
 #include "ast/Stmt.h"
 
 namespace ccomp {
-class TackyGen : public ExprVisitor, StmtVisitor {
+class TackyGen {
 public:
-  TackyGen(const std::vector<std::shared_ptr<Stmt>>& stmts, ErrorHandler& errorHandler);
+  TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts, ErrorHandler& errorHandler);
   std::shared_ptr<Tacky> gen();
 
 private:
-  const std::vector<std::shared_ptr<Stmt>>& stmts_;
+  const std::vector<std::unique_ptr<Stmt>>& stmts_;
+  std::vector<std::shared_ptr<Tacky>> instructions_;
   ErrorHandler& errorHandler_;
 
-  std::vector<std::shared_ptr<Tacky>> gen(std::shared_ptr<Expr> expr);
-  std::vector<std::shared_ptr<Tacky>> gen(std::shared_ptr<Stmt> stmt);
-  std::vector<std::shared_ptr<Tacky>> gen(std::vector<std::shared_ptr<Expr>> exprs);
-  std::vector<std::shared_ptr<Tacky>> gen(std::vector<std::shared_ptr<Stmt>> stmts);
+  std::shared_ptr<Tacky> gen(Expr* expr);
+  std::shared_ptr<Tacky> gen(Stmt* stmt);
+  void gen(const std::vector<std::unique_ptr<Stmt>>& stmts);
 
-  std::any genLogical(std::shared_ptr<BinaryExpr> expr);
+  std::shared_ptr<Tacky> genLogical(const BinaryExpr& expr);
   std::string unique_var();
-  std::shared_ptr<TackyLabel> unique_label(const std::string& desc);
+  std::string unique_label(const std::string& desc);
 
-private:
-  std::any visitBlock(std::shared_ptr<Block> stmt) override;
-  std::any visitExpression(std::shared_ptr<Expression> stmt) override;
-  std::any visitFunction(std::shared_ptr<Function> stmt) override;
-  std::any visitIf(std::shared_ptr<If> stmt) override;
-  std::any visitPrint(std::shared_ptr<Print> stmt) override;
-  std::any visitReturn(std::shared_ptr<Return> Stmt) override;
-  std::any visitWhile(std::shared_ptr<While> Stmt) override;
-  std::any visitDecl(std::shared_ptr<Decl> Stmt) override;
-  std::any visitNull(std::shared_ptr<Null> Stmt) override;
-  std::any visitAssign(std::shared_ptr<Assign> expr) override;
-  std::any visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) override;
-  std::any visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) override;
-  std::any visitUnaryExpr(std::shared_ptr<UnaryExpr> expr) override;
-  std::any visitVariable(std::shared_ptr<Variable> expr) override;
+  template<typename T, typename... Args>
+  std::shared_ptr<Tacky> make_tacky(Args&&... args)
+  { return std::make_shared<Tacky>(T(std::forward<Args>(args)...)); }
+
+public:
+  std::shared_ptr<Tacky> operator()(const Block& stmt);
+  std::shared_ptr<Tacky> operator()(const Expression& stmt);
+  std::shared_ptr<Tacky> operator()(const Function& stmt);
+  std::shared_ptr<Tacky> operator()(const If& stmt);
+  std::shared_ptr<Tacky> operator()(const Return& Stmt);
+  std::shared_ptr<Tacky> operator()(const While& Stmt);
+  std::shared_ptr<Tacky> operator()(const Decl& Stmt);
+  std::shared_ptr<Tacky> operator()(const Assign& expr);
+  std::shared_ptr<Tacky> operator()(const Null& expr);
+
+  std::shared_ptr<Tacky> operator()(const Conditional& expr);
+  std::shared_ptr<Tacky> operator()(const BinaryExpr& expr);
+  std::shared_ptr<Tacky> operator()(const LiteralExpr& expr);
+  std::shared_ptr<Tacky> operator()(const UnaryExpr& expr);
+  std::shared_ptr<Tacky> operator()(const Variable& expr);
 };
 }
 

@@ -1,10 +1,8 @@
-#include "AsmGen.h"
-#include "Codegen.h"
 #include "ErrorHandler.h"
 #include "Scanner.h"
 #include "Parser.h"
 #include "Resolver.h"
-#include "AstPrinter.h"
+// #include "AstPrinter.h"
 #include "TackyGen.h"
 #include "AsmGen.h"
 #include "Codegen.h"
@@ -100,7 +98,7 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
   }
 
   /// asmgen
-  ccomp::AsmGen asmgen(tackyasm, errorHandler);
+  ccomp::AsmGen asmgen(tackyasm.get(), errorHandler);
   auto progasm = asmgen.gen();
   // if found error during parsing, report
   if (errorHandler.foundError) {
@@ -109,7 +107,7 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
   }
 
   /// codegen
-  ccomp::Codegen codegen(progasm, errorHandler);
+  ccomp::Codegen codegen(progasm.get(), errorHandler);
   auto codeasm = codegen.code();
   // if found error during parsing, report
   if (errorHandler.foundError) {
@@ -125,15 +123,6 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
     printf("%s\n", codeasm.c_str());
   }
 
-#if 0
-
-  try {
-    interpreter->interpret(stmts);
-  } catch (const RuntimeException &e) {
-    std::cerr << e.what() << '\n' << "[line " << e.tok.line << "]" << '\n';
-    return 70;
-  }
-  #endif
   return 0;
 }
 

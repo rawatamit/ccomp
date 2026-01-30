@@ -1,56 +1,41 @@
 #include "TackyGen.h"
 #include "Token.h"
-#include "ast/Asm.h"
+//#include "ast/Asm.h"
 #include "ast/Tacky.h"
 #include "Util.h"
-#include <any>
 #include <cassert>
 #include <format>
-#include <iterator>
 #include <memory>
 #include <vector>
 
 using namespace ccomp;
 
-TackyGen::TackyGen(const std::vector<std::shared_ptr<Stmt>>& stmts, ErrorHandler &errorHandler) :
+TackyGen::TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts, ErrorHandler &errorHandler) :
   stmts_(stmts), errorHandler_(errorHandler)
 {}
 
 std::shared_ptr<Tacky> TackyGen::gen() {
   std::vector<std::shared_ptr<Tacky>> fns;
-  for (auto stmt : stmts_) {
-    auto fn = std::any_cast<std::shared_ptr<TackyFunction>>(stmt->accept(*this));
-    fns.push_back(fn);
+  for (auto& stmt : stmts_) {
+    auto fn = std::visit(*this, *stmt);
+    fns.emplace_back(fn);
   }
-  return std::make_shared<TackyProgram>(fns);
+  return make_tacky<TackyProgram>(fns);
 }
 
-std::vector<std::shared_ptr<Tacky>> TackyGen::gen(std::shared_ptr<Expr> expr) {
-  auto val = expr->accept(*this);
-  return std::any_cast<std::vector<std::shared_ptr<Tacky>>>(val);
+std::shared_ptr<Tacky> TackyGen::gen(Expr* expr) {
+  return std::visit(*this, *expr);
 }
 
-std::vector<std::shared_ptr<Tacky>> TackyGen::gen(std::shared_ptr<Stmt> stmt) {
-  auto val = stmt->accept(*this);
-  return std::any_cast<std::vector<std::shared_ptr<Tacky>>>(val);
+std::shared_ptr<Tacky> TackyGen::gen(Stmt* stmt) {
+  return std::visit(*this, *stmt);
 }
 
-std::vector<std::shared_ptr<Tacky>> TackyGen::gen(std::vector<std::shared_ptr<Expr>> exprs) {
-  std::vector<std::shared_ptr<Tacky>> genexprs;
-  for (auto expr : exprs) {
-    auto genexpr = gen(expr);
-    std::copy(genexpr.begin(), genexpr.end(), std::back_inserter(genexprs));
-  }
-  return genexprs;
-}
-
-std::vector<std::shared_ptr<Tacky>> TackyGen::gen(std::vector<std::shared_ptr<Stmt>> stmts) {
+void TackyGen::gen(const std::vector<std::unique_ptr<Stmt>>& stmts) {
   std::vector<std::shared_ptr<Tacky>> genstmts;
-  for (auto stmt : stmts) {
-    auto genexpr = gen(stmt);
-    std::copy(genexpr.begin(), genexpr.end(), std::back_inserter(genstmts));
+  for (auto& stmt : stmts) {
+    gen(stmt.get());
   }
-  return genstmts;
 }
 
 std::string TackyGen::unique_var() {
@@ -58,129 +43,174 @@ std::string TackyGen::unique_var() {
   return std::format("tmp.{}", nextId++);
 }
 
-std::shared_ptr<TackyLabel> TackyGen::unique_label(const std::string& desc) {
+std::string TackyGen::unique_label(const std::string& desc) {
   static int nextId = 0;
-  return std::make_shared<TackyLabel>(std::format("T{}.{}", desc, nextId++));
+  return std::format("T{}.{}", desc, nextId++);
 }
 
-std::any TackyGen::visitBlock(std::shared_ptr<Block> stmt) {
-  return gen(stmt->stmts);
-}
-
-std::any TackyGen::visitExpression(std::shared_ptr<Expression> stmt) {
-  return gen(stmt->expr);
-}
-
-std::any TackyGen::visitFunction(std::shared_ptr<Function> fn) {
-  std::vector<std::shared_ptr<Tacky>> insts;
-  for (auto p : fn->body) {
-    std::vector<std::shared_ptr<Tacky>> asmcode = gen(p);
-    std::copy(asmcode.begin(), asmcode.end(), std::back_inserter(insts));
-    // HACK: if there is an expression on its own without an assignment target,
-    // its value is discarded. Fix this.
-    if (!asmcode.empty() && std::dynamic_pointer_cast<TackyVar>(asmcode.back())) {
-      insts.pop_back();
-    }
-  }
-
-  // return 0 statement added to every function
-  insts.emplace_back(
-    std::make_shared<TackyReturn>(std::make_shared<TackyConstant>(0)));
-  return std::make_shared<TackyFunction>(fn->name, insts);
-}
-
-std::any TackyGen::visitIf(std::shared_ptr<If> stmt) {
-  printf("(if ");
-  gen(stmt->condition);
-  return stmt->thenBranch, stmt->elseBranch;
-}
-
-std::any TackyGen::visitPrint(std::shared_ptr<Print> stmt) {
-  return stmt->expr;
-}
-
-std::any TackyGen::visitReturn(std::shared_ptr<Return> ret) {
-  auto expr = gen(ret->value);
-  // convert constant or var to a return expression
-  expr.back() = std::make_shared<TackyReturn>(expr.back());
-  return expr;
-}
-
-std::any TackyGen::visitWhile(std::shared_ptr<While> Stmt) {
-  gen(Stmt->condition);
-  gen(Stmt->body);
+std::shared_ptr<Tacky> TackyGen::operator()(const Block& stmt) {
+  gen(stmt.stmts);
   return nullptr;
 }
 
-std::any TackyGen::visitDecl(std::shared_ptr<Decl> decl) {
-  if (auto init = decl->init) {
-    auto insts = gen(std::make_shared<Assign>(
-                  std::make_shared<Variable>(decl->name),
-                  decl->init));
-    // remove destination
-    insts.pop_back();
-    return insts;
+std::shared_ptr<Tacky> TackyGen::operator()(const Expression& stmt) {
+  return gen(stmt.expr.get());
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const Function& fn) {
+  // start with empty instructions
+  instructions_.clear();
+  gen(fn.body);
+
+  // return 0 statement added to every function
+
+  instructions_.emplace_back(
+    make_tacky<TackyReturn>(make_tacky<TackyConstant>(0)));
+  return make_tacky<TackyFunction>(fn.name, std::move(instructions_));
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const If& ifstmt) {
+  // <instructions for condition>
+  // c = <result of condition>
+  auto condvar = gen(ifstmt.condition.get());
+  auto end_label = make_tacky<TackyLabel>(unique_label("if_end"));
+
+  if (ifstmt.elseBranch == nullptr) {
+    // JumpIfZero(c, end)
+    instructions_.emplace_back(
+      make_tacky<TackyJumpIfZero>(condvar, end_label));
+
+    // <instructions for statement>
+    gen(ifstmt.thenBranch.get());
+  } else {
+    // JumpIfZero(c, else_label)
+    auto else_label = make_tacky<TackyLabel>(unique_label("if_else"));
+    instructions_.emplace_back(
+      make_tacky<TackyJumpIfZero>(condvar, else_label));
+
+    // <instructions for statement1>
+    gen(ifstmt.thenBranch.get());
+
+    // Jump(end)
+    instructions_.emplace_back(make_tacky<TackyJump>(end_label));
+
+    // Label(else_label)
+    instructions_.emplace_back(else_label);
+
+    // <instructions for statement2>
+    gen(ifstmt.elseBranch.get());
   }
 
-  return std::vector<std::shared_ptr<Tacky>>{};
+  // Label(end)
+  instructions_.emplace_back(end_label);
+  return nullptr;
 }
 
-std::any TackyGen::visitNull(std::shared_ptr<Null>) {
-  return std::vector<std::shared_ptr<Tacky>>{};
+std::shared_ptr<Tacky> TackyGen::operator()(const Return& ret) {
+  // convert constant or var to a return expression
+  instructions_.emplace_back(make_tacky<TackyReturn>(gen(ret.value.get())));
+  return nullptr;
 }
 
-std::any TackyGen::visitAssign(std::shared_ptr<Assign> expr) {
-  std::vector<std::shared_ptr<Tacky>> insts;
+std::shared_ptr<Tacky> TackyGen::operator()(const While& Stmt) {
+  gen(Stmt.condition.get());
+  gen(Stmt.body.get());
+  return nullptr;
+}
 
+std::shared_ptr<Tacky> TackyGen::operator()(const Decl& decl) {
+  if (auto& init = decl.init) {
+    // lvalue is Var(v)
+    auto dst = make_tacky<TackyVar>(std::string(decl.name.lexeme));
+    auto src = gen(init.get());
+
+    // copy src to dst
+    instructions_.emplace_back(
+      make_tacky<TackyCopy>(src, dst));
+    return make_tacky<TackyCopy>(src, dst);
+  }
+
+  // declaration is a statement
+  return nullptr;
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const Assign& expr) {
   // lvalue is Var(v)
-  auto lvalue = gen(expr->lvalue);
-  assert(lvalue.size() == 1);
-  auto dst = lvalue.back();
-
-  auto rvalue = gen(expr->value);
-  auto src = rvalue.back();
-  std::copy(rvalue.begin(), rvalue.end() - 1, std::back_inserter(insts));
+  auto dst = gen(expr.lvalue.get());
+  auto src = gen(expr.value.get());
 
   // copy src to dst
-  insts.emplace_back(std::make_shared<TackyCopy>(src, dst));
-
-  // result is stored in dst
-  insts.emplace_back(dst);
-  return insts;
+  instructions_.emplace_back(make_tacky<TackyCopy>(src, dst));
+  return dst;
 }
 
-std::any TackyGen::genLogical(std::shared_ptr<BinaryExpr> expr) {
-  TokenType op = expr->Operator.type;
-  std::vector<std::shared_ptr<Tacky>> insts;
-  // <instructions for e1>
-  std::vector<std::shared_ptr<Tacky>> left_code = gen(expr->left);
-  std::copy(left_code.begin(), left_code.end() - 1, std::back_inserter(insts));
+std::shared_ptr<Tacky> TackyGen::operator()(const Null&) {
+  return nullptr;
+}
 
+std::shared_ptr<Tacky> TackyGen::operator()(const Conditional& ternary) {
+  // <instructions for condition>
+  // c = <result of condition>
+  auto condvar = gen(ternary.condition.get());
+
+  // JumpIfZero(c, e2_label)
+  auto else_label = make_tacky<TackyLabel>(unique_label("ternary_else"));
+  instructions_.emplace_back(make_tacky<TackyJumpIfZero>(condvar, else_label));
+
+  // <instructions to calculate e1>
   // v1 = <result of e1>
-  std::shared_ptr<Tacky> v1 = left_code.back();
+  // result = v1
+  auto thenRes = gen(ternary.thenExp.get());
+  auto result = make_tacky<TackyVar>(unique_var());
+  instructions_.emplace_back(make_tacky<TackyCopy>(thenRes, result));
 
-  std::shared_ptr<TackyLabel> result_both_check_label = unique_label("logical");
-  std::shared_ptr<TackyLabel> end_label = unique_label("logical");
+  // Jump(end)
+  auto end_label = make_tacky<TackyLabel>(unique_label("ternary_end"));
+  instructions_.emplace_back(make_tacky<TackyJump>(end_label));
+
+  // Label(e2_label)
+  instructions_.emplace_back(else_label);
+
+  // <instructions to calculate e2>
+  // v2 = <result of e2>
+  // result = v2
+  auto elseRes = gen(ternary.elseExp.get());
+  instructions_.emplace_back(make_tacky<TackyCopy>(elseRes, result));
+
+  // Label(end)
+  instructions_.emplace_back(end_label);
+  return result;
+}
+
+std::shared_ptr<Tacky> TackyGen::genLogical(const BinaryExpr& expr) {
+  TokenType op = expr.Operator.type;
+  // <instructions for e1>
+  // v1 = <result of e1>
+  std::shared_ptr<Tacky> v1 = gen(expr.left.get());
+
+  auto result_both_check_label = make_tacky<TackyLabel>(unique_label("logical"));
+  auto end_label = make_tacky<TackyLabel>(unique_label("logical"));
 
   // JumpIfZero|JumpIfNotZero(v1, result_both_check_label)
   if (op == TokenType::AMPERSAND_AMPERSAND) {
-    insts.emplace_back(std::make_shared<TackyJumpIfZero>(v1, result_both_check_label));
+    instructions_.emplace_back(
+      make_tacky<TackyJumpIfZero>(v1, result_both_check_label));
   } else if (op == TokenType::PIPE_PIPE) {
-    insts.emplace_back(std::make_shared<TackyJumpIfNotZero>(v1, result_both_check_label));
+    instructions_.emplace_back(
+      make_tacky<TackyJumpIfNotZero>(v1, result_both_check_label));
   }
 
   // <instructions for e2>
-  std::vector<std::shared_ptr<Tacky>> right_code = gen(expr->right);
-  std::copy(right_code.begin(), right_code.end() - 1, std::back_inserter(insts));
-
   // v2 = <result of e2>
-  std::shared_ptr<Tacky> v2 = right_code.back();
+  std::shared_ptr<Tacky> v2 = gen(expr.right.get());
 
   // JumpIfZero|JumpIfNotZero(v2, result_both_check_label)
   if (op == TokenType::AMPERSAND_AMPERSAND) {
-    insts.emplace_back(std::make_shared<TackyJumpIfZero>(v2, result_both_check_label));
+    instructions_.emplace_back(
+      make_tacky<TackyJumpIfZero>(v2, result_both_check_label));
   } else if (op == TokenType::PIPE_PIPE) {
-    insts.emplace_back(std::make_shared<TackyJumpIfNotZero>(v2, result_both_check_label));
+    instructions_.emplace_back(
+      make_tacky<TackyJumpIfNotZero>(v2, result_both_check_label));
   }
 
   // result = 1|0
@@ -188,31 +218,30 @@ std::any TackyGen::genLogical(std::shared_ptr<BinaryExpr> expr) {
   // conditions are false. Note we are using JumpIfZero for && and JumpIfNotZero
   // for ||.
   int result_after_two_checks = (op == TokenType::AMPERSAND_AMPERSAND) ? 1 : 0;
-  auto result = std::make_shared<TackyVar>(unique_var());
-  insts.emplace_back(std::make_shared<TackyCopy>(
-    std::make_shared<TackyConstant>(result_after_two_checks), result));
+  auto result = make_tacky<TackyVar>(unique_var());
+  instructions_.emplace_back(make_tacky<TackyCopy>(
+    make_tacky<TackyConstant>(result_after_two_checks), result));
 
   // Jump(end)
-  insts.emplace_back(std::make_shared<TackyJump>(end_label));
+  instructions_.emplace_back(make_tacky<TackyJump>(end_label));
 
   // Label(result_both_check_label)
-  insts.emplace_back(result_both_check_label);
+  instructions_.emplace_back(result_both_check_label);
 
   // result = 0|1
   int result_after_label = 1 - result_after_two_checks;
-  insts.emplace_back(std::make_shared<TackyCopy>(std::make_shared<TackyConstant>(result_after_label), result));
+  instructions_.emplace_back(
+    make_tacky<TackyCopy>(make_tacky<TackyConstant>(result_after_label), result));
 
   // Label(end)
-  insts.emplace_back(end_label);
-
-  insts.emplace_back(result);
-  return insts;
+  instructions_.emplace_back(end_label);
+  return result;
 }
 
-std::any TackyGen::visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) {
+std::shared_ptr<Tacky> TackyGen::operator()(const BinaryExpr& expr) {
   // binary_operator = Add | Subtract | Multiply | Divide | Remainder | Equal |
   // NotEqual | LessThan | LessOrEqual | GreaterThan | GreaterOrEqual
-  TokenType op = expr->Operator.type;
+  TokenType op = expr.Operator.type;
   bool isLogical = isLogicalOp(op);
   assert(one_of(op, {TokenType::PLUS, TokenType::MINUS, TokenType::STAR,
                 TokenType::SLASH, TokenType::PERCENT}) ||
@@ -223,77 +252,52 @@ std::any TackyGen::visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) {
     return genLogical(expr);
   }
 
-  std::vector<std::shared_ptr<Tacky>> insts;
   // v1 = emit_tacky(e1, instructions)
-  std::vector<std::shared_ptr<Tacky>> left_code =
-    (std::any_cast<std::vector<std::shared_ptr<Tacky>>>(gen(expr->left)));
-
-  // source var is at the end of the code
-  std::shared_ptr<Tacky> src1 = left_code.back();
-
-  // copy while skipping last entry, which is the variable
-  std::copy(left_code.begin(), left_code.end() - 1, std::back_inserter(insts));
+  std::shared_ptr<Tacky> src1 = gen(expr.left.get());
 
   // v2 = emit_tacky(e2, instructions)
-  std::vector<std::shared_ptr<Tacky>> right_code =
-    (std::any_cast<std::vector<std::shared_ptr<Tacky>>>(gen(expr->right)));
-
-  // source var is at the end of the code
-  std::shared_ptr<Tacky> src2 = right_code.back();
-
-  // copy while skipping last entry, which is the variable
-  std::copy(right_code.begin(), right_code.end() - 1, std::back_inserter(insts));
+  std::shared_ptr<Tacky> src2 = gen(expr.right.get());
 
   // dst_name = make_temporary()
   // dst = Var(dst_name)
-  auto dst = std::make_shared<TackyVar>(unique_var());
+  auto dst = make_tacky<TackyVar>(unique_var());
 
   // tacky_op = convert_binop(op)
   // instructions.append(Binary(tacky_op, v1, v2, dst))
   // NOTE: tacky_op and expr->Operator are the same.
-  insts.emplace_back(std::make_shared<TackyBinary>(expr->Operator, src1, src2, dst));
-
-  // return dst
-  insts.emplace_back(dst);
-  return insts;
+  instructions_.emplace_back(
+    make_tacky<TackyBinary>(expr.Operator, src1, src2, dst));
+  return dst;
 }
 
-std::any TackyGen::visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) {
-  assert(expr->type == TokenType::NUMBER);
-  return std::vector<std::shared_ptr<Tacky>>{
-    std::make_shared<TackyConstant>(std::stoi(expr->value))};
+std::shared_ptr<Tacky> TackyGen::operator()(const LiteralExpr& expr) {
+  assert(expr.type == TokenType::NUMBER);
+  auto lexpr = make_tacky<TackyConstant>(std::stoi(expr.value));
+  instructions_.emplace_back(lexpr);
+  return lexpr;
 }
 
-std::any TackyGen::visitUnaryExpr(std::shared_ptr<UnaryExpr> expr) {
+std::shared_ptr<Tacky> TackyGen::operator()(const UnaryExpr& expr) {
   // unary_operator = Complement | Negate | Not
-  assert(one_of(expr->Operator.type, {TokenType::TILDE, TokenType::MINUS,
+  assert(one_of(expr.Operator.type, {TokenType::TILDE, TokenType::MINUS,
                 TokenType::BANG}));
-  std::vector<std::shared_ptr<Tacky>> insts;
 
   // src = emit_tacky(inner, instructions)
-  std::vector<std::shared_ptr<Tacky>> asm_code =
-    (std::any_cast<std::vector<std::shared_ptr<Tacky>>>(gen(expr->right)));
-  // source var is at the end of the code
-  std::shared_ptr<Tacky> src = asm_code.back();
-
-  // copy while skipping last entry, which is the variable
-  std::copy(asm_code.begin(), asm_code.end() - 1, std::back_inserter(insts));
+  std::shared_ptr<Tacky> src = gen(expr.right.get());
 
   // dst_name = make_temporary()
   // dst = Var(dst_name)
-  auto dst = std::make_shared<TackyVar>(unique_var());
+  auto dst = make_tacky<TackyVar>(unique_var());
 
   // tacky_op = convert_unop(op)
   // instructions.append(Unary(tacky_op, src, dst))
   // NOTE: tacky_op and expr->Operator are the same.
-  insts.emplace_back(std::make_shared<TackyUnary>(expr->Operator, src, dst));
+  instructions_.emplace_back(
+    make_tacky<TackyUnary>(expr.Operator, src, dst));
 
-  // return dst
-  insts.emplace_back(dst);
-  return insts;
+  return dst;
 }
 
-std::any TackyGen::visitVariable(std::shared_ptr<Variable> var) {
-  return std::vector<std::shared_ptr<Tacky>>{
-    std::make_shared<TackyVar>(var->name.lexeme)};
+std::shared_ptr<Tacky> TackyGen::operator()(const Variable& var) {
+  return make_tacky<TackyVar>(var.name.lexeme);
 }

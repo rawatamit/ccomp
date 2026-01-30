@@ -2,155 +2,90 @@
 #define Stmt_H_
 
 #include "Token.h"
+#include "Expr.h"
 #include <memory>
-#include <any>
 #include <vector>
+#include <variant>
+
 namespace ccomp {
-class Stmt;
 class Block;
 class Expression;
 class Function;
 class If;
-class Print;
 class Return;
 class While;
 class Decl;
 class Null;
-class Expr;
-
-class StmtVisitor {
-public:
-  virtual ~StmtVisitor() {}
-  virtual std::any     visitBlock  (std::shared_ptr<Block  > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitExpression (std::shared_ptr<Expression > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitFunction   (std::shared_ptr<Function   > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitIf         (std::shared_ptr<If         > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitPrint      (std::shared_ptr<Print      > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitReturn     (std::shared_ptr<Return     > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitWhile      (std::shared_ptr<While      > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitDecl       (std::shared_ptr<Decl       > Stmt __attribute_maybe_unused__) { return nullptr; }
-  virtual std::any     visitNull       (std::shared_ptr<Null       > Stmt __attribute_maybe_unused__) { return nullptr; }
+using Stmt = std::variant<Block, Expression, Function, If, Return, While, Decl, Null>;
+class Block {
+public: 
+  Block(  std::vector<std::unique_ptr<Stmt>> stmts) :
+    stmts(std::move(stmts)) {}
+public: 
+  std::vector<std::unique_ptr<Stmt>> stmts;
 };
 
-class Stmt {
-public:
-  virtual ~Stmt() {}
-  virtual std::any accept(StmtVisitor& visitor) = 0;
+class Expression {
+public: 
+  Expression(  std::unique_ptr<Expr> expr) :
+    expr(std::move(expr)) {}
+public: 
+  std::unique_ptr<Expr> expr;
 };
 
-class Block   : public std::enable_shared_from_this<Block  >, public Stmt { 
+class Function {
 public: 
-  Block  (   std::vector<std::shared_ptr<Stmt>> stmts)  :
-    stmts(stmts) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Block  > p{shared_from_this()};
-    return visitor.visitBlock  (p);
-  }
+  Function(  Token name,   std::vector<Token> params,   std::vector<std::unique_ptr<Stmt>> body) :
+    name(name), params(params), body(std::move(body)) {}
 public: 
-   std::vector<std::shared_ptr<Stmt>> stmts;
+  Token name;
+  std::vector<Token> params;
+  std::vector<std::unique_ptr<Stmt>> body;
 };
 
-class Expression  : public std::enable_shared_from_this<Expression >, public Stmt { 
+class If {
 public: 
-  Expression (   std::shared_ptr<Expr> expr)  :
-    expr(expr) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Expression > p{shared_from_this()};
-    return visitor.visitExpression (p);
-  }
+  If(  std::unique_ptr<Expr> condition,   std::unique_ptr<Stmt> thenBranch,   std::unique_ptr<Stmt> elseBranch) :
+    condition(std::move(condition)), thenBranch(std::move(thenBranch)), elseBranch(std::move(elseBranch)) {}
 public: 
-   std::shared_ptr<Expr> expr;
+  std::unique_ptr<Expr> condition;
+  std::unique_ptr<Stmt> thenBranch;
+  std::unique_ptr<Stmt> elseBranch;
 };
 
-class Function    : public std::enable_shared_from_this<Function   >, public Stmt { 
+class Return {
 public: 
-  Function   (   Token name,    std::vector<Token> params,    std::vector<std::shared_ptr<Stmt>> body)  :
-    name(name), params(params), body(body) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Function   > p{shared_from_this()};
-    return visitor.visitFunction   (p);
-  }
+  Return(  Token keyword,   std::unique_ptr<Expr> value) :
+    keyword(keyword), value(std::move(value)) {}
 public: 
-   Token name;
-   std::vector<Token> params;
-   std::vector<std::shared_ptr<Stmt>> body;
+  Token keyword;
+  std::unique_ptr<Expr> value;
 };
 
-class If          : public std::enable_shared_from_this<If         >, public Stmt { 
+class While {
 public: 
-  If         (   std::shared_ptr<Expr> condition,    std::shared_ptr<Stmt> thenBranch,    std::shared_ptr<Stmt> elseBranch)  :
-    condition(condition), thenBranch(thenBranch), elseBranch(elseBranch) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<If         > p{shared_from_this()};
-    return visitor.visitIf         (p);
-  }
+  While(  std::unique_ptr<Expr> condition,   std::unique_ptr<Stmt> body) :
+    condition(std::move(condition)), body(std::move(body)) {}
 public: 
-   std::shared_ptr<Expr> condition;
-   std::shared_ptr<Stmt> thenBranch;
-   std::shared_ptr<Stmt> elseBranch;
+  std::unique_ptr<Expr> condition;
+  std::unique_ptr<Stmt> body;
 };
 
-class Print       : public std::enable_shared_from_this<Print      >, public Stmt { 
+class Decl {
 public: 
-  Print      (   std::shared_ptr<Expr> expr)  :
-    expr(expr) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Print      > p{shared_from_this()};
-    return visitor.visitPrint      (p);
-  }
+  Decl(  Token name,   std::unique_ptr<Expr> init) :
+    name(name), init(std::move(init)) {}
 public: 
-   std::shared_ptr<Expr> expr;
+  Token name;
+  std::unique_ptr<Expr> init;
 };
 
-class Return      : public std::enable_shared_from_this<Return     >, public Stmt { 
+class Null {
 public: 
-  Return     (   Token keyword,    std::shared_ptr<Expr> value)  :
-    keyword(keyword), value(value) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Return     > p{shared_from_this()};
-    return visitor.visitReturn     (p);
-  }
-public: 
-   Token keyword;
-   std::shared_ptr<Expr> value;
-};
-
-class While       : public std::enable_shared_from_this<While      >, public Stmt { 
-public: 
-  While      (   std::shared_ptr<Expr> condition,    std::shared_ptr<Stmt> body)  :
-    condition(condition), body(body) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<While      > p{shared_from_this()};
-    return visitor.visitWhile      (p);
-  }
-public: 
-   std::shared_ptr<Expr> condition;
-   std::shared_ptr<Stmt> body;
-};
-
-class Decl        : public std::enable_shared_from_this<Decl       >, public Stmt { 
-public: 
-  Decl       (   Token name,    std::shared_ptr<Expr> init)  :
-    name(name), init(init) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Decl       > p{shared_from_this()};
-    return visitor.visitDecl       (p);
-  }
-public: 
-   Token name;
-   std::shared_ptr<Expr> init;
-};
-
-class Null        : public std::enable_shared_from_this<Null       >, public Stmt { 
-public: 
-  Null       (   Token loc)  :
+  Null(  Token loc) :
     loc(loc) {}
- std::any accept(StmtVisitor& visitor) override {
-    std::shared_ptr<Null       > p{shared_from_this()};
-    return visitor.visitNull       (p);
-  }
 public: 
-   Token loc;
+  Token loc;
 };
 
 } // end namespace

@@ -7,8 +7,8 @@
 namespace ccomp {
 // source:
 // https://stackoverflow.com/questions/14265581/parse-split-a-string-in-c-using-string-delimiter-standard-c
-static std::vector<std::string> split(const std::string &str,
-                                      const std::string &delim) {
+static std::vector<std::string> split(const std::string& str,
+                                      const std::string& delim) {
   std::vector<std::string> tokens;
   size_t prev = 0, pos = 0;
   do {
@@ -16,13 +16,28 @@ static std::vector<std::string> split(const std::string &str,
     if (pos == std::string::npos)
       pos = str.length();
     auto token = str.substr(prev, pos - prev);
-    if (!token.empty())
+    if (!token.empty()) {
       tokens.push_back(token);
+    }
     prev = pos + delim.length();
   } while (pos < str.length() && prev < str.length());
   return tokens;
 }
-} // namespace ccomp
+
+// Trim from the start (in place)
+std::string left_trim(const std::string& str) {
+  auto s = std::string(str);
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
+      return !std::isspace(ch);
+  }));
+  return s;
+}
+
+std::string strip_whitespace(const std::string& str) {
+  auto s = std::string(str);
+  s.erase(remove_if(s.begin(), s.end(), isspace), s.end());
+  return s;
+}
 
 struct AstSpecification {
  std::string name;
@@ -32,13 +47,8 @@ struct AstSpecification {
     std::tuple<std::string,
         std::vector<std::string>>>
     enums;
- // Return type, and visitor name
- std::vector<
-    std::tuple<
-        std::string, // return type of visitor (encapsulated in shared_ptr)
-        std::string, // visitor name
-        std::string>> // visitor argument
-    visitors;
+ // headers to include
+ std::vector<std::string> headers;
 };
 
 class AstGen {
@@ -61,15 +71,15 @@ public:
     file << "#ifndef " + baseName + "_H_" << std::endl;
     file << "#define " + baseName + "_H_" << '\n' << '\n';
 
-    // Expr base abstract interface
-    file << "#include \"Token.h\"" << '\n';
-    file << "#include <memory>" << '\n';
-    file << "#include <any>" << '\n';
-    file << "#include <vector>" << '\n';
-    file << "namespace ccomp {" << '\n';
+    // header includes
+    for (auto& header : astSpec.headers) {
+      file << "#include " << header << '\n';
+    }
+
+    // start namespace
+    file << "\nnamespace ccomp {" << '\n';
 
     // forward declarations
-    file << "class " << baseName << ";" << std::endl;
     for (auto &type : astSpec.types) {
       auto className = type.substr(0, type.find(":"));
       // remove spaces from className
@@ -77,31 +87,33 @@ public:
                       className.end());
       file << "class " << className << ";\n";
     }
-    file << "class Expr;\n";
 
-    file << '\n';
-    defineVisitor(file, baseName);
-    file << '\n';
-
-    file << "class " << baseName << " {" << std::endl;
-    file << "public:" << std::endl;
-    for (auto& anenum : astSpec.enums) {
-      file << "  enum " << std::get<0>(anenum) << " {\n";
-      for (auto& field : std::get<1>(anenum)) {
-        file << "    " << field << ",\n";
+    // variant specification
+    file << "using " << baseName << " = std::variant<";
+    for (auto type = astSpec.types.begin(); type != astSpec.types.end(); ++type) {
+      auto className = type->substr(0, type->find(":"));
+      file << strip_whitespace(className);
+      if ((type + 1) == astSpec.types.end()) {
+        file << ">;\n";
+      } else {
+        file << ", ";
       }
-      file << "  };\n";
     }
-    file << "  virtual ~" << baseName << "() {}" << std::endl;
-    file << "  virtual std::any accept("
-         << baseName + "Visitor& visitor) = 0;" << '\n';
-    file << "};" << '\n' << '\n';
+
+    // enum definitions
+    for (auto& anenum : astSpec.enums) {
+      file << "enum " << baseName << std::get<0>(anenum) << " {\n";
+      for (auto& field : std::get<1>(anenum)) {
+        file << "  " << field << ",\n";
+      }
+      file << "};\n";
+    }
 
     // Derived concrete classes
     for (auto type : astSpec.types) {
       auto className = type.substr(0, type.find(":"));
       auto fields = type.substr(type.find(":") + 1, type.size());
-      defineType(file, baseName, className, fields);
+      defineType(file, className, fields);
     }
 
     /// } for namespace
@@ -111,73 +123,50 @@ public:
     file.close();
   }
 
-  void defineType(std::ofstream &file, const std::string &baseName,
-                  const std::string &className, const std::string fields) {
-    file << "class " + className + " : "
-         << "public std::enable_shared_from_this<" << className << ">,"
-         << " public " << baseName << " { " << std::endl;
+  void defineType(std::ofstream &file, const std::string &className,
+                  const std::string& fields) {
+    file << "class " << strip_whitespace(className) << " {\n";
     file << "public: " << '\n';
-    file << "  " << className << "(";
-    auto fieldList = ccomp::split(fields, ",");
+    file << "  " << strip_whitespace(className) << "(";
+    auto fieldList = split(fields, ",");
     bool first = true;
-    for (auto field : fieldList) {
+    for (const auto& field : fieldList) {
       if (!first)
         file << ", ";
       if (first)
         first = false;
-      file << "  " << field;
+      file << "  " << left_trim(field);
     }
-    file << ")  :" << '\n' << "    ";
+    file << ") :" << '\n' << "    ";
     first = true;
-    for (auto field : fieldList) {
+    for (const auto& field : fieldList) {
       if (!first)
         file << ", ";
       if (first)
         first = false;
-      auto fieldName = ccomp::split(field, " ")[1];
-      file << fieldName + "(" + fieldName + ")";
+      auto fieldName = split(field, " ")[1];
+      // take ownership only if field is unique_ptr
+      if (field.find("unique_ptr") != std::string::npos) {
+        file << fieldName << "(std::move(" << strip_whitespace(fieldName) << "))";
+      } else {
+        file << fieldName << "(" << strip_whitespace(fieldName) << ")";
+      }
     }
     file << " {}" << std::endl;
-    for (auto& visitor : astSpec.visitors) {
-        defineVisitor(file, className,
-            std::get<0>(visitor), std::get<1>(visitor), std::get<2>(visitor));
-    }
     file << "public: " << std::endl;
     for (auto field : fieldList) {
-      file << "  " << field << ';' << '\n';
+      file << "  " << left_trim(field) << ';' << '\n';
     }
     file << "};" << '\n' << '\n';
-  }
-
-  void defineVisitor(std::ofstream &file,
-    const std::string &className, const std::string& retType __attribute_maybe_unused__,
-    const std::string& visitorName, const std::string& visitorArg) {
-    file << " std::any " << visitorName << '('
-         << visitorArg << "& visitor) override {\n";
-    file << "    std::shared_ptr<" << className << "> p{shared_from_this()};"
-         << '\n';
-    file << "    return visitor.visit" << className << "(p);" << std::endl;
-    file << "  }" << std::endl;
-  }
-
-  void defineVisitor(std::ofstream &file, const std::string &baseName) {
-    auto visitorClassName = baseName + "Visitor";
-    file << "class " << visitorClassName << " {" << std::endl;
-    file << "public:" << std::endl;
-    file << "  virtual ~" << visitorClassName << "() {}" << std::endl;
-    for (auto type : astSpec.types) {
-      auto className = type.substr(0, type.find(":"));
-      file << "  virtual std::any "
-           << "    visit" + className << "(std::shared_ptr<" << className
-           << "> " << baseName << " __attribute_maybe_unused__) { return nullptr; }" << std::endl;
-    }
-    file << "};" << std::endl;
   }
 
 private:
   const std::string outDir;
   const AstSpecification astSpec;
 };
+} // namespace ccomp
+
+using namespace ccomp;
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -187,29 +176,29 @@ int main(int argc, char **argv) {
     std::cout << "ast_generator generating files in " << outDir << std::endl;
     const AstSpecification exprSpec = {
         "Expr",
-        {"Assign   : std::shared_ptr<Expr> lvalue, std::shared_ptr<Expr> value",
-         "BinaryExpr      : std::shared_ptr<Expr> left, Token Operator, std::shared_ptr<Expr> right",
+        {"Assign   : std::unique_ptr<Expr> lvalue, std::unique_ptr<Expr> value",
+         "Conditional     : std::unique_ptr<Expr> condition, std::unique_ptr<Expr> thenExp, std::unique_ptr<Expr> elseExp",
+         "BinaryExpr      : std::unique_ptr<Expr> left, Token Operator, std::unique_ptr<Expr> right",
          "LiteralExpr     : TokenType type, std::string value",
-         "UnaryExpr       : Token Operator, std::shared_ptr<Expr> right",
+         "UnaryExpr       : Token Operator, std::unique_ptr<Expr> right",
          "Variable        : Token name"},
         {},
-        {{"CObject", "accept", "ExprVisitor"}}};
+        {"\"Token.h\"", "<memory>", "<string>", "<variant>"}};
     AstGen exprGenerator(outDir, exprSpec);
     exprGenerator.generate();
 
     const AstSpecification stmtSpec = {
         "Stmt",
-        {"Block  : std::vector<std::shared_ptr<Stmt>> stmts",
-            "Expression : std::shared_ptr<Expr> expr",
-            "Function   : Token name, std::vector<Token> params, std::vector<std::shared_ptr<Stmt>> body",
-            "If         : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch, std::shared_ptr<Stmt> elseBranch",
-            "Print      : std::shared_ptr<Expr> expr",
-            "Return     : Token keyword, std::shared_ptr<Expr> value",
-            "While      : std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> body",
-            "Decl       : Token name, std::shared_ptr<Expr> init",
+        {"Block  : std::vector<std::unique_ptr<Stmt>> stmts",
+            "Expression : std::unique_ptr<Expr> expr",
+            "Function   : Token name, std::vector<Token> params, std::vector<std::unique_ptr<Stmt>> body",
+            "If         : std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> thenBranch, std::unique_ptr<Stmt> elseBranch",
+            "Return     : Token keyword, std::unique_ptr<Expr> value",
+            "While      : std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> body",
+            "Decl       : Token name, std::unique_ptr<Expr> init",
             "Null       : Token loc"},
         {},
-        {{"CObject", "accept", "StmtVisitor"}}};
+        {"\"Token.h\"", "\"Expr.h\"", "<memory>", "<vector>", "<variant>"}};
     AstGen stmtGenerator(outDir, stmtSpec);
     stmtGenerator.generate();
 
@@ -223,12 +212,12 @@ int main(int argc, char **argv) {
             "TackyVar : std::string identifier",
             "TackyReturn : std::shared_ptr<Tacky> value",
             "TackyCopy : std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest",
-            "TackyJump : std::shared_ptr<TackyLabel> target",
-            "TackyJumpIfZero : std::shared_ptr<Tacky> condition, std::shared_ptr<TackyLabel> target",
-            "TackyJumpIfNotZero : std::shared_ptr<Tacky> condition, std::shared_ptr<TackyLabel> target",
+            "TackyJump : std::shared_ptr<Tacky> target",
+            "TackyJumpIfZero : std::shared_ptr<Tacky> condition, std::shared_ptr<Tacky> target",
+            "TackyJumpIfNotZero : std::shared_ptr<Tacky> condition, std::shared_ptr<Tacky> target",
             "TackyLabel : std::string identifier"},
         {},
-        {{"Tacky", "accept", "TackyVisitor"}}};
+        {"\"Token.h\"", "<memory>", "<string>", "<vector>", "<variant>"}};
     AstGen tackyGenerator(outDir, tackySpec);
     tackyGenerator.generate();
 
@@ -241,20 +230,20 @@ int main(int argc, char **argv) {
                 "AsmCmp         : std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2",
                 "AsmIdiv        : std::shared_ptr<Asm> operand",
                 "AsmCdq         : int dummy",
-                "AsmJmp         : std::shared_ptr<AsmLabel> target",
-                "AsmJmpCC       : Asm::CondCode cond_code, std::shared_ptr<AsmLabel> target",
-                "AsmSetCC       : Asm::CondCode cond_code, std::shared_ptr<Asm> operand",
+                "AsmJmp         : std::shared_ptr<Asm> target",
+                "AsmJmpCC       : AsmCondCode cond_code, std::shared_ptr<Asm> target",
+                "AsmSetCC       : AsmCondCode cond_code, std::shared_ptr<Asm> operand",
                 "AsmLabel      : std::string identifier",
                 "AsmMov         : std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest",
                 "AsmAllocateStack : int size",
                 "AsmReturn      : int dummy",
                 "AsmImm         : int value",
-                "AsmRegister    : Asm::Reg reg",
+                "AsmRegister    : AsmReg reg",
                 "AsmPseudo      : std::string identifier",
                 "AsmStack       : int offset"},
         {{"CondCode", {"E", "NE", "G", "GE", "L", "LE"}},
                 {"Reg", {"AX", "DX", "R10", "R11"}}},
-        {{"Asm", "accept", "AsmVisitor"}}};
+        {"\"Token.h\"", "<memory>", "<vector>", "<string>", "<variant>"}};
     AstGen asmGenerator(outDir, asmSpec);
     asmGenerator.generate();
   }

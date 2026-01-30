@@ -7,33 +7,36 @@
 #include <memory>
 
 namespace ccomp {
-class AsmGen : public TackyVisitor {
+class AsmGen {
 public:
-  AsmGen(std::shared_ptr<Tacky> tackycode, ErrorHandler& errorHandler);
+  AsmGen(Tacky* tackycode, ErrorHandler& errorHandler);
   std::shared_ptr<Asm> gen();
 
 private:
-  std::shared_ptr<Tacky> tackycode_;
+  Tacky* tackycode_;
   ErrorHandler& errorHandler_;
+  std::vector<std::shared_ptr<Asm>> instructions_;
 
-  std::vector<std::shared_ptr<Asm>> gen(std::shared_ptr<Tacky> expr);
-  std::vector<std::shared_ptr<Asm>> gen(std::vector<std::shared_ptr<Tacky>> exprs);
+  std::shared_ptr<Asm> gen(Tacky* expr);
+  std::vector<std::shared_ptr<Asm>> gen(const std::vector<std::shared_ptr<Tacky>>& exprs);
+  std::shared_ptr<Asm> get_label(std::shared_ptr<Tacky> inst);
+
   // returns the size in bytes of stack space needed for function
-  std::shared_ptr<AsmProgram> replace_pseudo_regs(std::shared_ptr<AsmProgram> fn);
+  std::shared_ptr<Asm> replace_pseudo_regs(Asm* fn);
 
-private:
-  std::any visitTackyProgram(std::shared_ptr<TackyProgram> Tacky) override;
-  std::any visitTackyFunction(std::shared_ptr<TackyFunction> Tacky) override;
-  std::any visitTackyUnary(std::shared_ptr<TackyUnary> Tacky) override;
-  std::any visitTackyBinary(std::shared_ptr<TackyBinary> Tacky) override;
-  std::any visitTackyConstant(std::shared_ptr<TackyConstant> Tacky) override;
-  std::any visitTackyVar(std::shared_ptr<TackyVar> Tacky) override;
-  std::any visitTackyReturn(std::shared_ptr<TackyReturn> Tacky) override;
-  std::any visitTackyCopy(std::shared_ptr<TackyCopy> copy) override;
-  std::any visitTackyJump(std::shared_ptr<TackyJump> jmp) override;
-  std::any visitTackyJumpIfZero(std::shared_ptr<TackyJumpIfZero> jmp) override;
-  std::any visitTackyJumpIfNotZero(std::shared_ptr<TackyJumpIfNotZero> jmp) override;
-  std::any visitTackyLabel(std::shared_ptr<TackyLabel> label) override;
+public:
+  std::shared_ptr<Asm> operator()(const TackyProgram& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyFunction& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyUnary& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyBinary& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyConstant& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyVar& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyReturn& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyCopy& copy);
+  std::shared_ptr<Asm> operator()(const TackyJump& jmp);
+  std::shared_ptr<Asm> operator()(const TackyJumpIfZero& jmp);
+  std::shared_ptr<Asm> operator()(const TackyJumpIfNotZero& jmp);
+  std::shared_ptr<Asm> operator()(const TackyLabel& label);
 };
 }
 

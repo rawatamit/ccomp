@@ -2,6 +2,8 @@
 #define UTIL_H
 
 #include "Token.h"
+#include "ast/Asm.h"
+#include <memory>
 #include <vector>
 #include <algorithm>
 
@@ -20,6 +22,26 @@ inline bool isRelationalOp(TokenType op) {
 inline bool isLogicalOp(TokenType op) {
   return one_of(op, {TokenType::AMPERSAND_AMPERSAND,
                 TokenType::PIPE_PIPE});
+}
+
+template<typename T, typename... Args>
+std::shared_ptr<Asm> make_asm(Args&&... args)
+{ return std::make_shared<Asm>(T(std::forward<Args>(args)...)); }
+
+template<typename T, typename... Args>
+void add_inst(std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args)
+{
+  auto inst = std::make_shared<Asm>(T(std::forward<Args>(args)...));
+  instructions.emplace_back(inst);
+}
+
+template<typename T, typename... Args>
+std::shared_ptr<Asm> make_add_and_return(
+  std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args)
+{
+  auto inst = std::make_shared<Asm>(T(std::forward<Args>(args)...));
+  instructions.emplace_back(inst);
+  return inst;
 }
 }
 

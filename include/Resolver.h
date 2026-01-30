@@ -11,7 +11,7 @@
 
 namespace ccomp {
 
-class Resolver : public ExprVisitor, public StmtVisitor {
+class Resolver {
 private:
   enum FunctionType {
     NONEF,
@@ -19,7 +19,6 @@ private:
     INITIALIZER,
   };
 
-private:
   ErrorHandler &errorHandler_;
   FunctionType currentFunction_;
   std::vector<std::map<std::string, bool>> scopes_;
@@ -31,30 +30,36 @@ public:
   {}
 
   ~Resolver() = default;
-  void resolve(const std::vector<std::shared_ptr<Stmt>> &prog);
+  void resolve(const std::vector<std::unique_ptr<Stmt>>& prog);
 
 private:
-  void resolve(std::shared_ptr<Stmt> stmt);
-  void resolve(std::shared_ptr<Expr> expr);
-  void resolveDecls(const std::vector<std::shared_ptr<Decl>>& decls);
-  void resolveLocal(std::shared_ptr<Expr> expr, const Token &tok);
-  void resolveFunction(std::shared_ptr<Function> fn, FunctionType type);
+  void resolve(Stmt* stmt);
+  void resolve(Expr* expr);
+  void resolveDecls(const std::vector<std::unique_ptr<Decl>>& decls);
+  void resolveLocal(std::unique_ptr<Expr> expr, const Token& tok);
+  void resolveFunction(const Function& fn, FunctionType type);
 
   void beginScope();
   void endScope();
   void declare(const Token &tok);
   void define(const Token &name);
 
-  virtual std::any visitFunction(std::shared_ptr<Function> stmt) override;
-  virtual std::any visitExpression(std::shared_ptr<Expression> stmt) override;
-  virtual std::any visitReturn(std::shared_ptr<Return> stmt) override;
-  virtual std::any visitDecl(std::shared_ptr<Decl> stmt) override;
-  virtual std::any visitBlock(std::shared_ptr<Block> stmt) override;
-  virtual std::any visitAssign(std::shared_ptr<Assign> expr) override;
-  virtual std::any visitBinaryExpr(std::shared_ptr<BinaryExpr> expr) override;
-  virtual std::any visitLiteralExpr(std::shared_ptr<LiteralExpr> expr) override;
-  virtual std::any visitUnaryExpr(std::shared_ptr<UnaryExpr> expr) override;
-  virtual std::any visitVariable(std::shared_ptr<Variable> expr) override;
+public:
+  void operator()(const Block& stmt);
+  void operator()(const Expression& stmt);
+  void operator()(const Function& stmt);
+  void operator()(const If& stmt);
+  void operator()(const Return& stmt);
+  void operator()(const While& stmt);
+  void operator()(const Decl& stmt);
+  void operator()(const Null& stmt);
+
+  void operator()(const Assign& expr);
+  void operator()(const Conditional& expr);
+  void operator()(const BinaryExpr& expr);
+  void operator()(const LiteralExpr& expr);
+  void operator()(const UnaryExpr& expr);
+  void operator()(const Variable& expr);
 };
 
 } // namespace ccomp

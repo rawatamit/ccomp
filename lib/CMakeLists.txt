@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-set(AST_GEN_FILES 
+set(AST_GEN_FILES
     ${PROJECT_SOURCE_DIR}/include/ast/Asm.h
     ${PROJECT_SOURCE_DIR}/include/ast/Expr.h
     ${PROJECT_SOURCE_DIR}/include/ast/Stmt.h)

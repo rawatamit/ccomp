@@ -18,6 +18,8 @@ enum class TokenType {
   STAR = 10,
   TILDE,
   PERCENT,
+  QUESTION_MARK,
+  COLON,
 
   // One or two character tokens.
   AMPERSAND,
@@ -48,10 +50,8 @@ enum class TokenType {
   CLASS,
   ELSE,
   FALSE,
-  FUN,
   FOR,
   IF,
-  NIL,
   PRINT,
   RETURN,
   SUPER,

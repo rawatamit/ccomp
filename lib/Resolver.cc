@@ -2,27 +2,27 @@
 
 using namespace ccomp;
 
-void Resolver::resolve(const std::vector<std::shared_ptr<Stmt>> &prog) {
-  for (auto stmt : prog) {
-    resolve(stmt);
+void Resolver::resolve(const std::vector<std::unique_ptr<Stmt>>& prog) {
+  for (auto& stmt : prog) {
+    resolve(stmt.get());
   }
 }
 
-void Resolver::resolve(std::shared_ptr<Stmt> stmt) {
-  stmt->accept(*this);
+void Resolver::resolve(Stmt* stmt) {
+  std::visit(*this, *stmt);
 }
 
-void Resolver::resolve(std::shared_ptr<Expr> expr) {
-  expr->accept(*this);
+void Resolver::resolve(Expr* expr) {
+  std::visit(*this, *expr);
 }
 
-void Resolver::resolveDecls(const std::vector<std::shared_ptr<Decl>>& decls) {
-  for (auto decl : decls) {
-    resolve(decl);
-  }
+void Resolver::resolveDecls(const std::vector<std::unique_ptr<Decl>>&) {
+  //for (auto& decl : decls) {
+    //resolve(decl);
+  //}
 }
 
-void Resolver::resolveLocal(std::shared_ptr<Expr> expr, const Token &tok) {
+void Resolver::resolveLocal(std::unique_ptr<Expr>, const Token &tok) {
   for (int i = scopes_.size() - 1; i >= 0; --i) {
     if (scopes_[i].find(tok.lexeme) != scopes_[i].end()) {
       return;
@@ -32,16 +32,16 @@ void Resolver::resolveLocal(std::shared_ptr<Expr> expr, const Token &tok) {
   // not found, assume global
 }
 
-void Resolver::resolveFunction(std::shared_ptr<Function> fn,
+void Resolver::resolveFunction(const Function& fn,
                                FunctionType type) {
   FunctionType enclosingFn = currentFunction_;
   currentFunction_ = type;
   beginScope();
-  for (auto &param : fn->params) {
+  for (auto &param : fn.params) {
     declare(param);
     define(param);
   }
-  resolve(fn->body);
+  resolve(fn.body);
   endScope();
   currentFunction_ = enclosingFn;
 }
@@ -72,8 +72,8 @@ void Resolver::define(const Token &name) {
 }
 
 #if 0
-std::any
-Resolver::visitClass(std::shared_ptr<Class> klass) {
+void
+Resolver::visitClass(std::unique_ptr<Class> klass) {
   ClassType enclosingClass = currentClass;
   currentClass = ClassType::CLASS;
   declare(klass->name);
@@ -110,82 +110,90 @@ Resolver::visitClass(std::shared_ptr<Class> klass) {
 }
 #endif
 
-std::any Resolver::visitFunction(std::shared_ptr<Function> fn) {
-  declare(fn->name);
-  define(fn->name);
+void Resolver::operator()(const Function& fn) {
+  declare(fn.name);
+  define(fn.name);
   resolveFunction(fn, FUNCTION);
-  return nullptr;
 }
 
-std::any Resolver::visitExpression(std::shared_ptr<Expression> stmt) {
-  resolve(stmt->expr);
-  return nullptr;
+void Resolver::operator()(const If& ifstmt) {
+  resolve(ifstmt.condition.get());
+  resolve(ifstmt.thenBranch.get());
+  if (auto& elseBranch = ifstmt.elseBranch) {
+    resolve(elseBranch.get());
+  }
 }
 
-std::any Resolver::visitReturn(std::shared_ptr<Return> ret) {
+void Resolver::operator()(const Block& block) {
+  beginScope();
+  resolve(block.stmts);
+  endScope();
+}
+
+void Resolver::operator()(const Expression& stmt) {
+  resolve(stmt.expr.get());
+}
+
+void Resolver::operator()(const Return& ret) {
   if (currentFunction_ == NONEF) {
-    errorHandler_.add(ret->keyword.line, " at 'return'",
+    errorHandler_.add(ret.keyword.line, " at 'return'",
                      "Cannot return from top-level code.");
   }
 
-  if (ret->value != nullptr) {
+  if (auto& retVal = ret.value) {
     if (currentFunction_ == INITIALIZER) {
-      errorHandler_.add(ret->keyword.line, " at 'return'",
+      errorHandler_.add(ret.keyword.line, " at 'return'",
                        "Cannot return a value from an initialiser.");
     } else {
-      resolve(ret->value);
+      resolve(retVal.get());
     }
   }
-
-  return nullptr;
 }
 
-std::any Resolver::visitDecl(std::shared_ptr<Decl> decl) {
-  declare(decl->name);
-  if (decl->init != nullptr) {
-    resolve(decl->init);
+void Resolver::operator()(const While&) {}
+
+void Resolver::operator()(const Decl& decl) {
+  declare(decl.name);
+  if (decl.init != nullptr) {
+    resolve(decl.init.get());
   }
-  define(decl->name);
-  return nullptr;
+  define(decl.name);
 }
 
-std::any Resolver::visitBlock(std::shared_ptr<Block> block) {
-  beginScope();
-  resolve(block->stmts);
-  endScope();
-  return nullptr;
-}
+void Resolver::operator()(const Null&) {}
 
-std::any Resolver::visitAssign(std::shared_ptr<Assign> assign) {
-  auto lvalue = assign->lvalue;
-  resolve(lvalue);
-  if (auto e = std::dynamic_pointer_cast<Variable>(lvalue)) {
-    resolve(assign->value);
+void Resolver::operator()(const Assign& assign) {
+  auto& lvalue = assign.lvalue;
+  resolve(lvalue.get());
+  if (std::holds_alternative<Variable>(*lvalue)) {
+    resolve(assign.value.get());
     //resolveLocal(expr, expr->name);
   } else {
     // TODO: fix line number.
     errorHandler_.add(0, " at assign ",
                       "Invalid target for assignment.");
   }
-  return nullptr;
 }
 
-std::any Resolver::visitBinaryExpr(std::shared_ptr<BinaryExpr> binexpr) {
-  resolve(binexpr->left);
-  resolve(binexpr->right);
-  return nullptr;
+void Resolver::operator()(const Conditional& tertiary) {
+  resolve(tertiary.condition.get());
+  resolve(tertiary.thenExp.get());
+  resolve(tertiary.elseExp.get());
 }
 
-std::any Resolver::visitLiteralExpr(std::shared_ptr<LiteralExpr>) {
-  return nullptr;
+void Resolver::operator()(const BinaryExpr& binexpr) {
+  resolve(binexpr.left.get());
+  resolve(binexpr.right.get());
 }
 
-std::any Resolver::visitUnaryExpr(std::shared_ptr<UnaryExpr> unary) {
-  resolve(unary->right);
-  return nullptr;
+void Resolver::operator()(const LiteralExpr&) {
 }
 
-std::any Resolver::visitVariable(std::shared_ptr<Variable> var) {
+void Resolver::operator()(const UnaryExpr& unary) {
+  resolve(unary.right.get());
+}
+
+void Resolver::operator()(const Variable& var) {
 #if 0
   if (!scopes_.empty()) {
     auto it = scopes_.back().find(var->name.lexeme);
@@ -196,12 +204,11 @@ std::any Resolver::visitVariable(std::shared_ptr<Variable> var) {
   }
 #endif
 
-  auto it = scopes_.back().find(var->name.lexeme);
+  auto it = scopes_.back().find(var.name.lexeme);
   if (it == scopes_.back().end()) {
-    errorHandler_.add(var->name.line, " at '" + var->name.lexeme + "'",
+    errorHandler_.add(var.name.line, " at '" + var.name.lexeme + "'",
                       "Variable not defined before use.");
   }
 
-  resolveLocal(var, var->name);
-  return nullptr;
+  //resolveLocal(var, var.name);
 }
