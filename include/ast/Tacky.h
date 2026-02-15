@@ -20,27 +20,29 @@ class TackyJump;
 class TackyJumpIfZero;
 class TackyJumpIfNotZero;
 class TackyLabel;
-using Tacky = std::variant<TackyProgram, TackyFunction, TackyUnary, TackyBinary, TackyConstant, TackyVar, TackyReturn, TackyCopy, TackyJump, TackyJumpIfZero, TackyJumpIfNotZero, TackyLabel>;
+class TackyFunCall;
+using Tacky = std::variant<TackyProgram, TackyFunction, TackyUnary, TackyBinary, TackyConstant, TackyVar, TackyReturn, TackyCopy, TackyJump, TackyJumpIfZero, TackyJumpIfNotZero, TackyLabel, TackyFunCall>;
 class TackyProgram {
 public: 
-  TackyProgram(  std::vector<std::shared_ptr<Tacky>> functions) :
-    functions(functions) {}
+  TackyProgram(std::vector<std::shared_ptr<Tacky>> functions) :
+    functions(std::move(functions)) {}
 public: 
   std::vector<std::shared_ptr<Tacky>> functions;
 };
 
 class TackyFunction {
 public: 
-  TackyFunction(  Token name,   std::vector<std::shared_ptr<Tacky>> instructions) :
-    name(name), instructions(instructions) {}
+  TackyFunction(Token name, std::vector<std::shared_ptr<Tacky>> params, std::vector<std::shared_ptr<Tacky>> instructions) :
+    name(name), params(std::move(params)), instructions(std::move(instructions)) {}
 public: 
   Token name;
+  std::vector<std::shared_ptr<Tacky>> params;
   std::vector<std::shared_ptr<Tacky>> instructions;
 };
 
 class TackyUnary {
 public: 
-  TackyUnary(  Token op,   std::shared_ptr<Tacky> src,   std::shared_ptr<Tacky> dest) :
+  TackyUnary(Token op, std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest) :
     op(op), src(src), dest(dest) {}
 public: 
   Token op;
@@ -50,7 +52,7 @@ public:
 
 class TackyBinary {
 public: 
-  TackyBinary(  Token op,   std::shared_ptr<Tacky> src1,   std::shared_ptr<Tacky> src2,   std::shared_ptr<Tacky> dest) :
+  TackyBinary(Token op, std::shared_ptr<Tacky> src1, std::shared_ptr<Tacky> src2, std::shared_ptr<Tacky> dest) :
     op(op), src1(src1), src2(src2), dest(dest) {}
 public: 
   Token op;
@@ -61,7 +63,7 @@ public:
 
 class TackyConstant {
 public: 
-  TackyConstant(  int value) :
+  TackyConstant(int value) :
     value(value) {}
 public: 
   int value;
@@ -69,7 +71,7 @@ public:
 
 class TackyVar {
 public: 
-  TackyVar(  std::string identifier) :
+  TackyVar(std::string identifier) :
     identifier(identifier) {}
 public: 
   std::string identifier;
@@ -77,7 +79,7 @@ public:
 
 class TackyReturn {
 public: 
-  TackyReturn(  std::shared_ptr<Tacky> value) :
+  TackyReturn(std::shared_ptr<Tacky> value) :
     value(value) {}
 public: 
   std::shared_ptr<Tacky> value;
@@ -85,7 +87,7 @@ public:
 
 class TackyCopy {
 public: 
-  TackyCopy(  std::shared_ptr<Tacky> src,   std::shared_ptr<Tacky> dest) :
+  TackyCopy(std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest) :
     src(src), dest(dest) {}
 public: 
   std::shared_ptr<Tacky> src;
@@ -94,7 +96,7 @@ public:
 
 class TackyJump {
 public: 
-  TackyJump(  std::shared_ptr<Tacky> target) :
+  TackyJump(std::shared_ptr<Tacky> target) :
     target(target) {}
 public: 
   std::shared_ptr<Tacky> target;
@@ -102,7 +104,7 @@ public:
 
 class TackyJumpIfZero {
 public: 
-  TackyJumpIfZero(  std::shared_ptr<Tacky> condition,   std::shared_ptr<Tacky> target) :
+  TackyJumpIfZero(std::shared_ptr<Tacky> condition, std::shared_ptr<Tacky> target) :
     condition(condition), target(target) {}
 public: 
   std::shared_ptr<Tacky> condition;
@@ -111,7 +113,7 @@ public:
 
 class TackyJumpIfNotZero {
 public: 
-  TackyJumpIfNotZero(  std::shared_ptr<Tacky> condition,   std::shared_ptr<Tacky> target) :
+  TackyJumpIfNotZero(std::shared_ptr<Tacky> condition, std::shared_ptr<Tacky> target) :
     condition(condition), target(target) {}
 public: 
   std::shared_ptr<Tacky> condition;
@@ -120,10 +122,20 @@ public:
 
 class TackyLabel {
 public: 
-  TackyLabel(  std::string identifier) :
+  TackyLabel(std::string identifier) :
     identifier(identifier) {}
 public: 
   std::string identifier;
+};
+
+class TackyFunCall {
+public: 
+  TackyFunCall(std::string fname, std::vector<std::shared_ptr<Tacky>> args, std::shared_ptr<Tacky> dest) :
+    fname(fname), args(std::move(args)), dest(dest) {}
+public: 
+  std::string fname;
+  std::vector<std::shared_ptr<Tacky>> args;
+  std::shared_ptr<Tacky> dest;
 };
 
 } // end namespace

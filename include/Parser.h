@@ -23,9 +23,9 @@ public:
   Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler);
   size_t current;
   std::unique_ptr<Stmt> declaration();
-  Function function();
-  Block blockStatement();
-  std::unique_ptr<Stmt> varDeclaration();
+  std::unique_ptr<Stmt> function(Token name);
+  std::unique_ptr<Stmt> blockStatement();
+  std::unique_ptr<Stmt> varDeclaration(Token name);
   std::unique_ptr<Stmt> statement();
   std::unique_ptr<Stmt> ifStatement();
   std::unique_ptr<Stmt> whileStatement();

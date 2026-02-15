@@ -2,17 +2,18 @@
 #include "Scanner.h"
 #include "Parser.h"
 #include "Resolver.h"
+#include "TypeResolver.h"
 // #include "AstPrinter.h"
-#include "TackyGen.h"
 #include "AsmGen.h"
 #include "Codegen.h"
+#include "TackyGen.h"
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <format>
-#include <vector>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 const int PHASE_LEX = 0x1;
 const int PHASE_PARSE = 0x2;
@@ -20,10 +21,11 @@ const int PHASE_RESOLVE = 0x4;
 const int PHASE_TACKY = 0x8;
 const int PHASE_CODEGEN = 0xf;
 
-#define SETBIT(val, mask) ((val) |= (1<<(mask)))
-#define ISBITSET(val, mask) (((val) & (1<<(mask)))!=0)
+#define SETBIT(val, mask) ((val) |= (1 << (mask)))
+#define ISBITSET(val, mask) (((val) & (1 << (mask))) != 0)
 
-static int compile(const std::string& source, const char* outputpath, ccomp::ErrorHandler& errorHandler, int compiler_phases) {
+static int compile(const std::string &source, const char *outputpath,
+                   ccomp::ErrorHandler &errorHandler, int compiler_phases) {
   if (!ISBITSET(compiler_phases, PHASE_LEX)) {
     printf("no lex\n");
     return 0;
@@ -78,6 +80,13 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
     return 65;
   }
 
+  ccomp::TypeResolver tyresolver(errorHandler);
+  tyresolver.resolve(stmts);
+  if (errorHandler.foundError) {
+    errorHandler.report();
+    return 65;
+  }
+
   if (!ISBITSET(compiler_phases, PHASE_TACKY)) {
     printf("no tackygen\n");
     return 0;
@@ -126,12 +135,15 @@ static int compile(const std::string& source, const char* outputpath, ccomp::Err
   return 0;
 }
 
-static int compileFile(const std::string& path, const char* outputpath, ccomp::ErrorHandler& errorHandler, int compiler_phases) {
+static int compileFile(const std::string &path, const char *outputpath,
+                       ccomp::ErrorHandler &errorHandler, int compiler_phases) {
   // preprocess file with gcc
   std::filesystem::path filepath(path);
   std::filesystem::path filestem = filepath.filename().stem();
-  std::filesystem::path preprocesedpath = filepath.parent_path() / (filestem.string() + ".pre");
-  std::string gcc_args = std::format("gcc -E -P {} -o {}", path, preprocesedpath.c_str());
+  std::filesystem::path preprocesedpath =
+      filepath.parent_path() / (filestem.string() + ".pre");
+  std::string gcc_args =
+      std::format("gcc -E -P {} -o {}", path, preprocesedpath.c_str());
   int retCode = std::system(gcc_args.c_str());
 
   std::ifstream file(preprocesedpath.c_str());
@@ -149,38 +161,59 @@ static int compileFile(const std::string& path, const char* outputpath, ccomp::E
   return retCode;
 }
 
-int main(int argc, char** argv) {
+// Build an exe if compile_exe is true, else create an object file.
+static int driver(std::filesystem::path filepath, bool compile_exe) {
   int retCode = 0;
+  int compiler_phases = 0;
+  SETBIT(compiler_phases, PHASE_LEX);
+  SETBIT(compiler_phases, PHASE_PARSE);
+  SETBIT(compiler_phases, PHASE_RESOLVE);
+  SETBIT(compiler_phases, PHASE_TACKY);
+  SETBIT(compiler_phases, PHASE_CODEGEN);
+
+  std::filesystem::path filestem = filepath.filename().stem();
+  std::filesystem::path asmoutputpath =
+      filepath.parent_path() / (filestem.string() + ".s");
+  printf("compiling %s\n", filepath.c_str());
+  printf("output filename %s\n", asmoutputpath.c_str());
+
+  ccomp::ErrorHandler errorHandler;
+  retCode = compileFile(filepath, asmoutputpath.c_str(), errorHandler,
+                        compiler_phases);
+
+  // Fail to generate assembly.
+  if (retCode != 0) {
+    return retCode;
+  }
+
+  std::filesystem::path outputpath = filepath.parent_path() / filestem;
+  std::string gcc_args = compile_exe ?
+    // produced an asm file, compile exe with gcc.
+    std::format("gcc {} -o {}", asmoutputpath.c_str(), outputpath.c_str()) :
+    // compile obj with gcc.
+    std::format("gcc -c {} -o {}.o", asmoutputpath.c_str(), outputpath.c_str());
+
+  retCode = std::system(gcc_args.c_str());
+  return retCode;
+}
+
+int main(int argc, char **argv) {
+  int retCode = 0;
+
   if (argc < 2) {
     printf("Usage: ccomp [filename]\n");
     retCode = 1;
   } else if (argc == 2) {
-    int compiler_phases = 0;
-    SETBIT(compiler_phases, PHASE_LEX);
-    SETBIT(compiler_phases, PHASE_PARSE);
-    SETBIT(compiler_phases, PHASE_RESOLVE);
-    SETBIT(compiler_phases, PHASE_TACKY);
-    SETBIT(compiler_phases, PHASE_CODEGEN);
-
     std::filesystem::path filepath(argv[1]);
-    std::filesystem::path filestem = filepath.filename().stem();
-    std::filesystem::path asmoutputpath = filepath.parent_path() / (filestem.string() + ".s");
-    printf ("compiling %s\n", filepath.c_str());
-    printf("output filename %s\n", asmoutputpath.c_str());
-
-    ccomp::ErrorHandler errorHandler;
-    retCode = compileFile(filepath, asmoutputpath.c_str(), errorHandler,
-                          compiler_phases);
-    if (retCode == 0) {
-      // produced an asm file, compile with gcc.
-      std::filesystem::path binoutputpath = filepath.parent_path() / filestem;
-      std::string gcc_args = std::format("gcc {} -o {}", asmoutputpath.c_str(), binoutputpath.c_str());
-      retCode = std::system(gcc_args.c_str());
-    }
+    return driver(filepath, true);
   } else if (argc == 3) {
-    const char* opt = argv[1];
+    const char *opt = argv[1];
+    const char *filepath = argv[2];
     int compiler_phases = 0;
-    if (strcmp(opt, "--lex") == 0) {
+
+    if (strcmp(opt, "-c") == 0) {
+      return driver(std::filesystem::path(filepath), false);
+    } else if (strcmp(opt, "--lex") == 0) {
       SETBIT(compiler_phases, PHASE_LEX);
     } else if (strcmp(opt, "--parse") == 0) {
       SETBIT(compiler_phases, PHASE_LEX);
@@ -202,7 +235,6 @@ int main(int argc, char** argv) {
       SETBIT(compiler_phases, PHASE_CODEGEN);
     }
 
-    const char* filepath = argv[2];
     ccomp::ErrorHandler errorHandler;
     retCode = compileFile(filepath, nullptr, errorHandler, compiler_phases);
   }

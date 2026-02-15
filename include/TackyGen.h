@@ -35,6 +35,7 @@ public:
   std::shared_ptr<Tacky> operator()(const Block& stmt);
   std::shared_ptr<Tacky> operator()(const Expression& stmt);
   std::shared_ptr<Tacky> operator()(const Function& stmt);
+  std::shared_ptr<Tacky> operator()(const FunctionParam&);
   std::shared_ptr<Tacky> operator()(const If& stmt);
   std::shared_ptr<Tacky> operator()(const Return& Stmt);
   std::shared_ptr<Tacky> operator()(const DoWhile& Stmt);
@@ -51,6 +52,7 @@ public:
   std::shared_ptr<Tacky> operator()(const LiteralExpr& expr);
   std::shared_ptr<Tacky> operator()(const UnaryExpr& expr);
   std::shared_ptr<Tacky> operator()(const Variable& expr);
+  std::shared_ptr<Tacky> operator()(const Call&);
 };
 }
 

@@ -119,8 +119,6 @@ void Scanner::scanAndAddToken() {
         }
         cur = advanceAndGetChar();
       }
-      // skip /
-      // cur = advanceAndGetChar();
     } else {
       addToken(TokenType::SLASH);
     }

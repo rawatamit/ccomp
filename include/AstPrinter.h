@@ -13,7 +13,7 @@
 #include <vector>
 
 namespace ccomp {
-class AstPrinter : public ExprVisitor, StmtVisitor {
+class AstPrinter {
 public:
   std::shared_ptr<CObject> print(std::shared_ptr<Expr> expr) {
     std::any val = expr->accept(*this);

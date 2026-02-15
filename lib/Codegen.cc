@@ -156,6 +156,19 @@ std::string Codegen::operator()(const AsmAllocateStack& alloc) {
   return std::format("subq ${}, %rsp", alloc.size);
 }
 
+std::string Codegen::operator()(const AsmDeallocateStack& dealloc) {
+  return std::format("addq ${}, %rsp", dealloc.size);
+}
+
+std::string Codegen::operator()(const AsmPush& push) {
+  auto operand = code(push.operand);
+  return std::format("pushq {}", operand);
+}
+
+std::string Codegen::operator()(const AsmCall& call) {
+  return std::format("call {}@PLT", call.fname);
+}
+
 std::string Codegen::operator()(const AsmImm& imm) {
   return std::format("${}", imm.value);
 }
@@ -165,24 +178,63 @@ std::string Codegen::operator()(const AsmReturn&) {
 }
 
 std::string Codegen::operator()(const AsmRegister& reg) {
-  switch (reg.reg) {
-    case AsmReg::AX:
-      return std::string("%eax");
-    /*
-    case Asm::Reg::BX:
-      return std::string("%ebx");
-    case 2:
-      return std::string("%ecx");
-    */
-    case AsmReg::DX:
-      return std::string("%edx");
-    case AsmReg::R10:
-      return std::string("%r10d");
-    case AsmReg::R11:
-      return std::string("%r11d");
-    default:
-      return nullptr;
+  static std::unordered_map<AsmReg,
+          std::unordered_map<AsmWordSize, std::string>> regmap = {
+    {AsmReg::AX,
+          {{AsmWordSize::QUAD, "%rax"},
+           {AsmWordSize::LONG, "%eax"},
+           {AsmWordSize::BYTE, "%al"}}},
+
+    {AsmReg::CX,
+          {{AsmWordSize::QUAD, "%rcx"},
+           {AsmWordSize::LONG, "%ecx"},
+           {AsmWordSize::BYTE, "%cl"}}},
+
+    {AsmReg::DX,
+          {{AsmWordSize::QUAD, "%rdx"},
+           {AsmWordSize::LONG, "%edx"},
+           {AsmWordSize::BYTE, "%dl"}}},
+
+    {AsmReg::DI,
+          {{AsmWordSize::QUAD, "%rdi"},
+           {AsmWordSize::LONG, "%edi"},
+           {AsmWordSize::BYTE, "%dil"}}},
+
+    {AsmReg::SI,
+          {{AsmWordSize::QUAD, "%rsi"},
+           {AsmWordSize::LONG, "%esi"},
+           {AsmWordSize::BYTE, "%sil"}}},
+
+    {AsmReg::R8,
+          {{AsmWordSize::QUAD, "%r8"},
+           {AsmWordSize::LONG, "%r8d"},
+           {AsmWordSize::BYTE, "%r8b"}}},
+
+    {AsmReg::R9,
+          {{AsmWordSize::QUAD, "%r9"},
+           {AsmWordSize::LONG, "%r9d"},
+           {AsmWordSize::BYTE, "%r9b"}}},
+
+    {AsmReg::R10,
+          {{AsmWordSize::QUAD, "%r10"},
+           {AsmWordSize::LONG, "%r10d"},
+           {AsmWordSize::BYTE, "%r10b"}}},
+
+    {AsmReg::R11,
+          {{AsmWordSize::QUAD, "%r11"},
+           {AsmWordSize::LONG, "%r11d"},
+           {AsmWordSize::BYTE, "%r11b"}}}};
+
+  // find register
+  auto regnames = regmap.find(reg.reg); 
+  if (regnames != regmap.end()) {
+    // find name based on size
+    auto it = regnames->second.find(reg.size);
+    if (it != regnames->second.end()) {
+      return it->second;
+    }
   }
+
   return nullptr;
 }
 
@@ -193,5 +245,5 @@ std::string Codegen::operator()(const AsmPseudo&) {
 
 std::string Codegen::operator()(const AsmStack& st) {
   // -ve offset from rbp
-  return std::format("-{}(%rbp)", st.offset);
+  return std::format("{}(%rbp)", st.offset);
 }

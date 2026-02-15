@@ -34,6 +34,9 @@ public:
   std::string operator()(const AsmLabel& label);
   std::string operator()(const AsmMov& Asm);
   std::string operator()(const AsmAllocateStack& Asm);
+  std::string operator()(const AsmDeallocateStack& Asm);
+  std::string operator()(const AsmPush& Asm);
+  std::string operator()(const AsmCall& Asm);
   std::string operator()(const AsmReturn& Asm);
   std::string operator()(const AsmImm& Asm);
   std::string operator()(const AsmRegister& Asm);

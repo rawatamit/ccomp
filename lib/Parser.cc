@@ -2,7 +2,6 @@
 #include "ErrorHandler.h"
 #include "Token.h"
 #include <stdexcept>
-#include <sys/cdefs.h>
 
 using namespace ccomp;
 
@@ -14,67 +13,72 @@ Parser::Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler)
 
 std::unique_ptr<Stmt> Parser::declaration() {
   try {
-#if 1
     if (match({TokenType::INT})) {
-      return varDeclaration();
-    }
-#endif
-#if 0
-    else if (match({TokenType::FUN})) {
-      return std::dynamic_pointer_cast<Stmt>(function());
-    } else if (match({TokenType::CLASS})) {
-      return classDecl();
+      Token name = consume(TokenType::IDENTIFIER, "Expected identifier after type.");
+      if (peek().type == TokenType::LEFT_PAREN) {
+        return function(name);
+      } else {
+        return varDeclaration(name);
+      }
     } else {
-#endif
       return statement();
-#if 0
     }
-#endif
   } catch (const ParseError &e) {
     synchronize();
-    return nullptr;
   }
+  return nullptr;
 }
 
-Function Parser::function() {
-  Token returnType = consume(TokenType::INT, "Expected return type.");
-  Token name = consume(TokenType::IDENTIFIER, "Expected function name.");
-
+std::unique_ptr<Stmt> Parser::function(Token name) {
   consume(TokenType::LEFT_PAREN, "expect '(' after function name.");
 
-  std::vector<Token> params;
+  std::vector<std::unique_ptr<Stmt>> params;
+  bool void_in_params = false;
   if (!check(TokenType::RIGHT_PAREN)) {
     do {
-      if (params.size() >= 255) {
-        error(peek(), "can't have >= 255 parameters.");
+      if (match({TokenType::VOID})) {
+        if (void_in_params) {
+          error(peek(), "void repeated in function parameter list");
+        } else if (!params.empty()) {
+          error(peek(), "void appears with other parameters");
+        }
+
+        void_in_params = true;
       } else {
-        params.push_back(
-            //consume(TokenType::IDENTIFIER, "Expected parameter name."));
-            consume(TokenType::VOID, "Expected parameter name."));
+        // can't intermix void and typed parameters
+        if (void_in_params) {
+          error(peek(), "Function parameter contains void and typed parameters.");
+        }
+
+        Token type = consume(TokenType::INT, "Expected type for parameter.");
+        Token name = consume(TokenType::IDENTIFIER, "Expected parameter name.");
+
+        params.push_back(std::make_unique<Stmt>(FunctionParam(type, name)));
       }
     } while (match({TokenType::COMMA}));
   }
 
   consume(TokenType::RIGHT_PAREN, "Expected ')' after parameters.");
-
-  consume(TokenType::LEFT_BRACE, "Expected '{' before function body.");
-  auto body = blockStatement();
-  return Function(name, params, std::move(body.stmts));
+  // function declaration
+  if (match({TokenType::SEMICOLON})) {
+    return std::make_unique<Stmt>(Function(name, std::move(params), nullptr));
+  } else {
+    // function definition
+    consume(TokenType::LEFT_BRACE, "Expected '{' before function body.");
+    auto body = blockStatement();
+    return std::make_unique<Stmt>(Function(name, std::move(params), std::move(body)));
+  }
 }
 
-std::unique_ptr<Stmt> Parser::varDeclaration() {
-  // declarations must start with type
-  match({TokenType::INT});
-  Token name = consume(TokenType::IDENTIFIER, "Expected variable name.");
-
+std::unique_ptr<Stmt> Parser::varDeclaration(Token name) {
   std::unique_ptr<Expr> init;
   if (match({TokenType::EQUAL})) {
     init = expression();
   }
 
-  consume(TokenType::SEMICOLON, "expect ';' in var init.");
+  consume(TokenType::SEMICOLON, "expect ';' after var declaration.");
   return std::make_unique<Stmt>(
-    Decl(std::make_unique<Expr>(Variable(name, -1)), std::move(init)));
+    Decl(std::make_unique<Expr>(Variable(name)), std::move(init)));
 }
 
 std::unique_ptr<Stmt> Parser::statement() {
@@ -91,14 +95,14 @@ std::unique_ptr<Stmt> Parser::statement() {
   case TokenType::BREAK:
     match({TokenType::BREAK});
     consume(TokenType::SEMICOLON, "Expected ';' after break.");
-    return std::make_unique<Stmt>(Break(previous(), -1));
+    return std::make_unique<Stmt>(Break(previous()));
   case TokenType::CONTINUE:
     match({TokenType::CONTINUE});
     consume(TokenType::SEMICOLON, "Expected ';' after continue.");
-    return std::make_unique<Stmt>(Continue(previous(), -1));
+    return std::make_unique<Stmt>(Continue(previous()));
   case TokenType::LEFT_BRACE:
     match({TokenType::LEFT_BRACE});
-    return std::make_unique<Stmt>(blockStatement());
+    return blockStatement();
   case TokenType::IF:
     match({TokenType::IF});
     return ifStatement();
@@ -125,7 +129,6 @@ std::unique_ptr<Stmt> Parser::ifStatement() {
     elseBranch = statement();
   }
 
-  //return std::make_unique<Stmt>(If(std::move(condition), std::move(thenBranch), std::move(elseBranch)));
   return std::make_unique<Stmt>(If(std::move(condition), std::move(thenBranch), std::move(elseBranch)));
 }
 
@@ -135,7 +138,7 @@ std::unique_ptr<Stmt> Parser::whileStatement() {
   consume(TokenType::RIGHT_PAREN, "need ')' in condition for while");
 
   auto body = statement();
-  return std::make_unique<Stmt>(While(std::move(condition), std::move(body), -1));
+  return std::make_unique<Stmt>(While(std::move(condition), std::move(body)));
 }
 
 std::unique_ptr<Stmt> Parser::doWhileStatement() {
@@ -149,7 +152,7 @@ std::unique_ptr<Stmt> Parser::doWhileStatement() {
   consume(TokenType::RIGHT_PAREN, "Expected ')' in condition for while");
   consume(TokenType::SEMICOLON, "Expected ';' after do .. while");
 
-  return std::make_unique<Stmt>(DoWhile(std::move(body), std::move(condition), -1));
+  return std::make_unique<Stmt>(DoWhile(std::move(body), std::move(condition)));
 }
 
 std::unique_ptr<Stmt> Parser::forStatement() {
@@ -160,10 +163,12 @@ std::unique_ptr<Stmt> Parser::forStatement() {
   // init can be a declaration or statment
   std::unique_ptr<Stmt> init = nullptr;
   switch (peek().type) {
-  case TokenType::INT:
+  case TokenType::INT: {
     match({TokenType::INT});
-    init = varDeclaration();
+    Token name = consume(TokenType::IDENTIFIER, "Expected identifier after type.");
+    init = varDeclaration(name);
     break;
+  }
   case TokenType::SEMICOLON:
     consume(TokenType::SEMICOLON, "Expected ';' in init");
     break;
@@ -187,11 +192,11 @@ std::unique_ptr<Stmt> Parser::forStatement() {
   consume(TokenType::RIGHT_PAREN, "Expected ')' after update");
 
   auto body = statement();
-  body = std::make_unique<Stmt>(For(std::move(init), std::move(condition), std::move(post), std::move(body), -1));
+  body = std::make_unique<Stmt>(For(std::move(init), std::move(condition), std::move(post), std::move(body)));
   return body;
 }
 
-Block Parser::blockStatement() {
+std::unique_ptr<Stmt> Parser::blockStatement() {
   std::vector<std::unique_ptr<Stmt>> stmts;
 
   while (!check(TokenType::RIGHT_BRACE) and !isAtEnd()) {
@@ -199,7 +204,7 @@ Block Parser::blockStatement() {
   }
 
   consume(TokenType::RIGHT_BRACE, "Expected '}' after block");
-  return Block(std::move(stmts));
+  return std::make_unique<Stmt>(Block(std::move(stmts)));
 }
 
 std::unique_ptr<Stmt> Parser::expressionStatement() {
@@ -333,10 +338,6 @@ std::unique_ptr<Expr> Parser::call() {
         throw error(previous(), "Expected identifier in call expression.");
       }
       e = finishCall(std::move(e));
-    } else if (match({TokenType::DOT})) {
-      Token name =
-          consume(TokenType::IDENTIFIER, "Expected property name after '.'.");
-      // e = std::static_pointer_cast<Expr>(std::make_unique<Get>(e, name));
     } else {
       break;
     }
@@ -345,21 +346,16 @@ std::unique_ptr<Expr> Parser::call() {
   return e;
 }
 
-std::unique_ptr<Expr> Parser::finishCall(std::unique_ptr<Expr>) {
+std::unique_ptr<Expr> Parser::finishCall(std::unique_ptr<Expr> e) {
   std::vector<std::unique_ptr<Expr>> args;
   if (!check(TokenType::RIGHT_PAREN)) {
     do {
-      if (args.size() >= 255) {
-        error(peek(), "cannot have more than 255 arguments");
-      } else {
-        args.push_back(expression());
-      }
+      args.push_back(expression());
     } while (match({TokenType::COMMA}));
   }
 
   Token paren = consume(TokenType::RIGHT_PAREN, "expected ')' in call");
-  return nullptr;
-  // return std::static_pointer_cast<Expr>(std::make_unique<Call>(e, paren, args));
+  return std::make_unique<Expr>(Call(std::move(e), std::move(args)));
 }
 
 std::unique_ptr<Expr> Parser::primary() {
@@ -376,7 +372,7 @@ std::unique_ptr<Expr> Parser::primary() {
     // return std::static_pointer_cast<Expr>(std::make_unique<GroupingExpr>(expr));
   }
   if (match({TokenType::IDENTIFIER})) {
-    return std::make_unique<Expr>(Variable(previous(), -1));
+    return std::make_unique<Expr>(Variable(previous()));
   }
   throw error(peek(), "Expected expression.");
   return nullptr;
@@ -386,8 +382,9 @@ std::vector<std::unique_ptr<Stmt>> Parser::parse() {
   std::vector<std::unique_ptr<Stmt>> stmts;
 
   while (!isAtEnd()) {
-    //stmts.push_back(declaration());
-    stmts.push_back(std::make_unique<Stmt>(function()));
+    consume(TokenType::INT, "Expected type in function declaration.");
+    Token name = consume(TokenType::IDENTIFIER, "Expected identifier after type.");
+    stmts.push_back(function(name));
   }
 
   return stmts;

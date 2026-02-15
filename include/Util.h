@@ -3,6 +3,9 @@
 
 #include "Token.h"
 #include "ast/Asm.h"
+#include "ast/Expr.h"
+#include "ast/Stmt.h"
+#include <format>
 #include <memory>
 #include <vector>
 #include <algorithm>
@@ -22,6 +25,38 @@ inline bool isRelationalOp(TokenType op) {
 inline bool isLogicalOp(TokenType op) {
   return one_of(op, {TokenType::AMPERSAND_AMPERSAND,
                 TokenType::PIPE_PIPE});
+}
+
+inline std::string toStr(const Function& fn) {
+  return fn.name.toString();
+}
+
+inline std::string toStr(const Variable& var) {
+  int level = var.level;
+  return std::format("{}_scope_level{}", var.name.toString(), level);
+}
+
+inline std::string toStr(const FunctionParam& var) {
+  int level = var.level;
+  return std::format("{}_scope_level{}", var.name.toString(), level);
+}
+
+// From https://stackoverflow.com/a/3407254
+inline int roundUp(int num, int multiple) {
+  if (multiple == 0) {
+    return num;
+  }
+
+  int remainder = abs(num) % multiple;
+  if (remainder == 0) {
+    return num;
+  }
+
+  if (num < 0) {
+    return -(abs(num) - remainder);
+  } else {
+    return num + multiple - remainder;
+  }
 }
 
 template<typename T, typename... Args>

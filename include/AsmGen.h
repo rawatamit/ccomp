@@ -16,6 +16,8 @@ private:
   Tacky* tackycode_;
   ErrorHandler& errorHandler_;
   std::vector<std::shared_ptr<Asm>> instructions_;
+  // arguments passed in registers
+  static const std::vector<AsmReg> arg_regs_;
 
   std::shared_ptr<Asm> gen(Tacky* expr);
   std::vector<std::shared_ptr<Asm>> gen(const std::vector<std::shared_ptr<Tacky>>& exprs);
@@ -37,6 +39,7 @@ public:
   std::shared_ptr<Asm> operator()(const TackyJumpIfZero& jmp);
   std::shared_ptr<Asm> operator()(const TackyJumpIfNotZero& jmp);
   std::shared_ptr<Asm> operator()(const TackyLabel& label);
+  std::shared_ptr<Asm> operator()(const TackyFunCall& call);
 };
 }
 

@@ -18,7 +18,10 @@ std::shared_ptr<Tacky> TackyGen::gen() {
   std::vector<std::shared_ptr<Tacky>> fns;
   for (auto& stmt : stmts_) {
     auto fn = std::visit(*this, *stmt);
-    fns.emplace_back(fn);
+    // function definitions are used
+    if (fn) {
+      fns.emplace_back(fn);
+    }
   }
   return make_tacky<TackyProgram>(fns);
 }
@@ -32,7 +35,6 @@ std::shared_ptr<Tacky> TackyGen::gen(Stmt* stmt) {
 }
 
 void TackyGen::gen(const std::vector<std::unique_ptr<Stmt>>& stmts) {
-  std::vector<std::shared_ptr<Tacky>> genstmts;
   for (auto& stmt : stmts) {
     gen(stmt.get());
   }
@@ -66,15 +68,29 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Expression& stmt) {
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Function& fn) {
-  // start with empty instructions
-  instructions_.clear();
-  gen(fn.body);
+  // generate instructions for function definition, declarations don't
+  // correspond to instructions.
+  if (fn.body) {
+    // start with empty instructions
+    instructions_.clear();
+    std::vector<std::shared_ptr<Tacky>> params;
+    for (auto& param: fn.params) {
+      params.emplace_back(gen(param.get()));
+    }
 
-  // return 0 statement added to every function
+    gen(fn.body.get());
 
-  instructions_.emplace_back(
-    make_tacky<TackyReturn>(make_tacky<TackyConstant>(0)));
-  return make_tacky<TackyFunction>(fn.name, std::move(instructions_));
+    // return 0 statement added to every function
+    instructions_.emplace_back(
+      make_tacky<TackyReturn>(make_tacky<TackyConstant>(0)));
+    return make_tacky<TackyFunction>(fn.name, std::move(params), std::move(instructions_));
+  }
+
+  return nullptr;
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const FunctionParam& param) {
+  return make_tacky<TackyVar>(toStr(param));
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const If& ifstmt) {
@@ -221,9 +237,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Decl& decl) {
     auto src = gen(init.get());
 
     // copy src to dst
-    instructions_.emplace_back(
-      make_tacky<TackyCopy>(src, dst));
-    return make_tacky<TackyCopy>(src, dst);
+    instructions_.emplace_back(make_tacky<TackyCopy>(src, dst));
   }
 
   // declaration is a statement
@@ -354,7 +368,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const BinaryExpr& expr) {
   assert(one_of(op, {TokenType::PLUS, TokenType::MINUS, TokenType::STAR,
                 TokenType::SLASH, TokenType::PERCENT}) ||
          isLogical || isRelationalOp(op));
-  
+
   // Logical operations are short circuited.
   if (isLogical) {
     return genLogical(expr);
@@ -380,9 +394,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const BinaryExpr& expr) {
 
 std::shared_ptr<Tacky> TackyGen::operator()(const LiteralExpr& expr) {
   assert(expr.type == TokenType::NUMBER);
-  auto lexpr = make_tacky<TackyConstant>(std::stoi(expr.value));
-  instructions_.emplace_back(lexpr);
-  return lexpr;
+  return make_tacky<TackyConstant>(std::stoi(expr.value));
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const UnaryExpr& expr) {
@@ -407,5 +419,21 @@ std::shared_ptr<Tacky> TackyGen::operator()(const UnaryExpr& expr) {
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Variable& var) {
-  return make_tacky<TackyVar>(std::format("{}_scope_level{}", var.name.toString(), var.level));
+  return make_tacky<TackyVar>(toStr(var));
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const Call& call) {
+  // TODO: only functions name can appear in a call.
+  auto fn = std::get_if<Variable>(call.callee.get());
+  assert(fn != nullptr);
+
+  std::vector<std::shared_ptr<Tacky>> args;
+  for (auto& arg : call.args) {
+    args.emplace_back(gen(arg.get()));
+  }
+
+  auto fname = fn->name.toString();
+  auto dst = make_tacky<TackyVar>(unique_var());
+  instructions_.emplace_back(make_tacky<TackyFunCall>(fname, args, dst));
+  return dst;
 }

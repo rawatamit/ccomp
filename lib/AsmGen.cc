@@ -9,6 +9,8 @@
 
 using namespace ccomp;
 
+const std::vector<AsmReg> AsmGen::arg_regs_ = {DI, SI, DX, CX, R8, R9};
+
 AsmGen::AsmGen(Tacky* tackycode, ErrorHandler& errorHandler) :
   tackycode_(tackycode), errorHandler_(errorHandler)
 {}
@@ -62,8 +64,10 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       for (auto inst : fn.instructions) {
         auto fix_insts = fix_pseudo(inst.get());
       }
-      // stack allocation should be at the beginning
-      auto alloc_stack = make_asm<AsmAllocateStack>(fn_stack_size_);
+
+      // stack allocation at the beginning; round up to multiple of 16
+      int stack_size = roundUp(fn_stack_size_, 16);
+      auto alloc_stack = make_asm<AsmAllocateStack>(stack_size);
       instructions_.insert(instructions_.begin(), alloc_stack);
       return make_asm<AsmFunction>(fn.name, std::move(instructions_));
     }
@@ -86,7 +90,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
               std::holds_alternative<AsmStack>(*operand2)) {
             // movl -4(%rbp), %r10d
             // addl %r10d, -8(%rbp)
-            auto reg = make_asm<AsmRegister>(AsmReg::R10);
+            auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
             add_inst<AsmMov>(instructions_, operand1, reg);
             return make_add_and_return<AsmBinary>(instructions_, bin.op, reg, operand2);
           }
@@ -97,7 +101,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
             // movl -4(%rbp), %r11d
             // imull $3, %r11d
             // movl %r11d, -4(%rbp)
-            auto reg = make_asm<AsmRegister>(AsmReg::R11);
+            auto reg = make_asm<AsmRegister>(AsmReg::R11, AsmWordSize::LONG);
             add_inst<AsmMov>(instructions_, operand2, reg);
             add_inst<AsmBinary>(instructions_, bin.op, operand1, reg);
             return make_add_and_return<AsmMov>(instructions_, reg, operand2);
@@ -115,11 +119,11 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
 
       if (std::holds_alternative<AsmStack>(*operand1) &&
           std::holds_alternative<AsmStack>(*operand2)) {
-        auto reg = make_asm<AsmRegister>(AsmReg::R10);
+        auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
         add_inst<AsmMov>(instructions_, operand1, reg);
         return make_add_and_return<AsmCmp>(instructions_, reg, operand2);
       } else if (std::holds_alternative<AsmImm>(*operand2)) {
-        auto reg = make_asm<AsmRegister>(AsmReg::R11);
+        auto reg = make_asm<AsmRegister>(AsmReg::R11, AsmWordSize::LONG);
         add_inst<AsmMov>(instructions_, operand2, reg);
         return make_add_and_return<AsmCmp>(instructions_, operand1, reg);
       } else {
@@ -134,7 +138,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       if (std::holds_alternative<AsmImm>(*operand)) {
         // movl $3, %r10d
         // idivl %r10d
-        auto reg = make_asm<AsmRegister>(AsmReg::R10);
+        auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
         add_inst<AsmMov>(instructions_, operand, reg);
         return make_add_and_return<AsmIdiv>(instructions_, reg);
       } else {
@@ -169,7 +173,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
 
       if (std::holds_alternative<AsmStack>(*src) &&
           std::holds_alternative<AsmStack>(*dest)) {
-        auto reg = make_asm<AsmRegister>(AsmReg::R10);
+        auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
         add_inst<AsmMov>(instructions_, src, reg);
         return make_add_and_return<AsmMov>(instructions_, reg, dest);
       } else {
@@ -177,9 +181,21 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       }
     }
 
-    std::shared_ptr<Asm> operator()(const AsmAllocateStack&) {
-      assert(0);
-      return nullptr;
+    std::shared_ptr<Asm> operator()(const AsmAllocateStack& alloc) {
+      return make_add_and_return<AsmAllocateStack>(instructions_, alloc.size);
+    }
+
+    std::shared_ptr<Asm> operator()(const AsmDeallocateStack& dealloc) {
+      return make_add_and_return<AsmDeallocateStack>(instructions_, dealloc.size);
+    }
+
+    std::shared_ptr<Asm> operator()(const AsmPush& push) {
+      auto operand = fix_pseudo(push.operand.get());
+      return make_add_and_return<AsmPush>(instructions_, operand);
+    }
+
+    std::shared_ptr<Asm> operator()(const AsmCall& call) {
+      return make_add_and_return<AsmCall>(instructions_, call.fname);
     }
 
     std::shared_ptr<Asm> operator()(const AsmReturn& ret) {
@@ -191,16 +207,17 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
     }
 
     std::shared_ptr<Asm> operator()(const AsmRegister& reg) {
-      return make_asm<AsmRegister>(reg.reg);
+      return make_asm<AsmRegister>(reg.reg, reg.size);
     }
 
     std::shared_ptr<Asm> operator()(const AsmPseudo& pseudo) {
       // TODO: only integers for now
-      int stack_offset = INT_MIN;
+      int stack_offset = 0;
       auto it = reg_to_offset_.find(pseudo.identifier);
       if (it == reg_to_offset_.end()) {
         fn_stack_size_ += 4;
-        stack_offset = fn_stack_size_;
+        // stack locals stored as -ve offset relative to base
+        stack_offset = -fn_stack_size_;
         reg_to_offset_[pseudo.identifier] = stack_offset;
       } else {
         stack_offset = it->second;
@@ -209,9 +226,8 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       return make_asm<AsmStack>(stack_offset);
     }
 
-    std::shared_ptr<Asm> operator()(const AsmStack&) {
-      assert(0);
-      return nullptr;
+    std::shared_ptr<Asm> operator()(const AsmStack& st) {
+      return make_asm<AsmStack>(st.offset);
     }
   };
 
@@ -229,9 +245,35 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyProgram& prog) {
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
   instructions_.clear();
+
+  // prep params
+  int total_params = fn.params.size();
+  int num_reg_params = (total_params > static_cast<int>(arg_regs_.size()))
+                      ? 6 : total_params;
+  int num_stack_args = total_params - num_reg_params;
+
+  // copy params to registers
+  for (int i = 0; i < num_reg_params; ++i) {
+    auto reg = make_asm<AsmRegister>(arg_regs_[i], AsmWordSize::LONG);
+    auto param = gen(fn.params[i].get());
+    add_inst<AsmMov>(instructions_, reg, param);
+  }
+
+  // pass arguments on stack
+  // stack parameters start at offset +16
+  int param_stack_offset = 16;
+  for (int i = 0; i < num_stack_args; ++i) {
+    int index = num_reg_params + i;
+    auto param = gen(fn.params[index].get());
+    add_inst<AsmMov>(instructions_,
+                     make_asm<AsmStack>(param_stack_offset + 8 * i),  param);
+  }
+
+  // instructions
   for (auto& p : fn.instructions) {
     gen(p.get());
   }
+
   return make_asm<AsmFunction>(fn.name, std::move(instructions_));
 }
 
@@ -282,10 +324,11 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
     // Idiv(src2)
     // Mov(Reg(AX) or Reg(DX), dst)
     AsmReg reg = (optype == TokenType::SLASH) ? AsmReg::AX : AsmReg::DX;
-    add_inst<AsmMov>(instructions_, src1, make_asm<AsmRegister>(AsmReg::AX));
+    add_inst<AsmMov>(instructions_, src1, make_asm<AsmRegister>(AsmReg::AX, AsmWordSize::LONG));
     add_inst<AsmCdq>(instructions_, 0);
     add_inst<AsmIdiv>(instructions_, src2);
-    return make_add_and_return<AsmMov>(instructions_, make_asm<AsmRegister>(reg), dest);
+    return make_add_and_return<AsmMov>(instructions_,
+       make_asm<AsmRegister>(reg, AsmWordSize::LONG), dest);
   } else { // everything else
     // Mov(src1, dst)
     // Binary(op, src2, dst)
@@ -324,7 +367,7 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyVar& var) {
 std::shared_ptr<Asm> AsmGen::operator()(const TackyReturn& ret) {
   // tacky return can only be constants or var
   auto expr = gen(ret.value.get());
-  add_inst<AsmMov>(instructions_, expr, make_asm<AsmRegister>(AsmReg::AX));
+  add_inst<AsmMov>(instructions_, expr, make_asm<AsmRegister>(AsmReg::AX, AsmWordSize::LONG));
   return make_add_and_return<AsmReturn>(instructions_, 0);
 }
 
@@ -364,4 +407,58 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyJumpIfNotZero& jmp) {
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyLabel& label) {
   return make_add_and_return<AsmLabel>(instructions_, label.identifier);
+}
+
+std::shared_ptr<Asm> AsmGen::operator()(const TackyFunCall& call) {
+  // stack alignment
+  int total_args = call.args.size();
+  int num_reg_args = (total_args > static_cast<int>(arg_regs_.size()))
+                      ? 6 : total_args;
+  int num_stack_args = total_args - num_reg_args;
+  int stack_padding = 0;
+  if ((num_stack_args % 2) != 0) {
+    stack_padding = 8;
+    // pad by 8 if odd number of stack args
+    add_inst<AsmAllocateStack>(instructions_, stack_padding);
+  }
+
+  // pass arguments in registers
+  for (int i = 0; i < num_reg_args; ++i) {
+    auto reg = make_asm<AsmRegister>(arg_regs_[i], AsmWordSize::LONG);
+    auto res = gen(call.args[i].get());
+    add_inst<AsmMov>(instructions_, res, reg);
+  }
+
+  // pass arguments on stack
+  auto regAX_word = make_asm<AsmRegister>(AX, AsmWordSize::LONG);
+  auto regAX_quad = make_asm<AsmRegister>(AX, AsmWordSize::QUAD);
+  for (int i = 0; i < num_stack_args; ++i) {
+    int index = total_args - i - 1;
+    auto res = gen(call.args[index].get());
+    if (std::holds_alternative<AsmImm>(*res)) {
+      add_inst<AsmPush>(instructions_, res);
+    } else if (auto reg = std::get_if<AsmRegister>(res.get())) {
+      // stack push is 16 bytes
+      add_inst<AsmPush>(instructions_,
+                        make_asm<AsmRegister>(reg->reg, AsmWordSize::QUAD));
+    } else {
+      add_inst<AsmMov>(instructions_, make_asm<AsmImm>(0), regAX_word);
+      add_inst<AsmMov>(instructions_, res, regAX_word);
+      add_inst<AsmPush>(instructions_, regAX_quad);
+    }
+  }
+
+  // args are setup, call function
+  add_inst<AsmCall>(instructions_, call.fname);
+
+  // remove args from stack
+  int bytes_dealloc = 8 * num_stack_args + stack_padding;
+  if (bytes_dealloc > 0) {
+    add_inst<AsmDeallocateStack>(instructions_, bytes_dealloc);
+  }
+
+  // retrieve return value
+  auto dest = gen(call.dest.get());
+  add_inst<AsmMov>(instructions_, regAX_word, dest);
+  return dest;
 }
