@@ -1,13 +1,21 @@
 #include "Resolver.h"
+#include "Scope.h"
+#include "Symbol.h"
 #include "ast/Stmt.h"
+#include <format>
 #include <cassert>
 
 using namespace ccomp;
 
-bool isDiffLinkage(Scope::Linkage a, Scope::Linkage b) {
-  return (a == ccomp::Scope::LINKAGE_INTERNAL && b == ccomp::Scope::LINKAGE_EXTERNAL) ||
-         (a == ccomp::Scope::LINKAGE_EXTERNAL && b == ccomp::Scope::LINKAGE_INTERNAL);
-}
+int Resolver::uniqueId_ = 0;
+
+Resolver::Resolver(ErrorHandler& errorHandler)
+  : errorHandler_(errorHandler),
+    currentFunction_(NONEF),
+    globalScope_(std::make_shared<Scope>()),
+    curScope_(globalScope_),
+    loop_label_(0)
+{}
 
 void Resolver::resolve(const std::vector<std::unique_ptr<Stmt>>& prog) {
   for (auto& stmt : prog) {
@@ -27,8 +35,7 @@ void Resolver::resolveFunction(Function& fn,
                                FunctionType type) {
   FunctionType enclosingFn = currentFunction_;
   currentFunction_ = type;
-  beginScope<FunctionScope>();
-  fn.scope = std::make_shared<Scope>(*curScope_);
+  beginScope();
   for (auto& param : fn.params) {
     resolve(param.get());
   }
@@ -36,13 +43,13 @@ void Resolver::resolveFunction(Function& fn,
   if (fn.body) {
     resolve(fn.body.get());
   }
+
   endScope();
   currentFunction_ = enclosingFn;
 }
 
-template<typename T>
-void Resolver::beginScope(bool parent) {
-  curScope_ = std::make_shared<T>(parent ? curScope_: nullptr);
+void Resolver::beginScope() {
+  curScope_ = std::make_shared<Scope>(curScope_);
 }
 
 void Resolver::endScope() {
@@ -50,76 +57,28 @@ void Resolver::endScope() {
 }
 
 void Resolver::declare(const Token& name, Function* fn) {
-  Scope::ScopeDetail detail = curScope_->resolve(name);
-  bool foundVar = (detail.scope != nullptr);
-  bool isSameScope = foundVar && (curScope_->getLevel() == detail.scope->getLevel());
-  if (isSameScope
-      && isDiffLinkage(detail.linkage, Scope::LINKAGE_EXTERNAL)) {
+  auto sym = curScope_->resolve(name);
+  int level = sym ? sym->getNestingLevel() : -1;
+  bool isSameScope = (curScope_->getLevel() == level);
+  if (isSameScope && !sym->hasExternalLinkage()) {
       errorHandler_.add(
           name.line, " at '" + name.lexeme + "'",
           "Redefining variable as function.");
   }
 
-  auto pfn = getFunction(detail);
-  // Function with the same name.
-  // Number of argument must match.
+  auto pfn = sym ? sym->getFunction() : nullptr;
   if (pfn == nullptr) {
-    curScope_->declare(name, fn, Scope::LINKAGE_EXTERNAL);
+    sym = curScope_->declare(name, getUniqueName(*fn), true, fn, curScope_);
   } else if ((pfn->body != nullptr) && (fn->body != nullptr)) {
     errorHandler_.add(
         name.line, " at '" + name.lexeme + "'",
         "Function definition repeated.");
   } else if (fn->body != nullptr) {
     // replace declaration with definition
-    curScope_->declare(name, fn, Scope::LINKAGE_EXTERNAL);
-  }
-}
-
-void Resolver::declare(const Token &name, Variable* var) {
-  Scope::ScopeDetail detail = curScope_->resolve(name);
-  bool foundVar = (detail.scope != nullptr);
-  bool isSameScope = foundVar && (curScope_->getLevel() == detail.scope->getLevel());
-  if (isSameScope
-      && isDiffLinkage(detail.linkage, Scope::LINKAGE_INTERNAL)) {
-      errorHandler_.add(
-          name.line, " at '" + name.lexeme + "'",
-          "Redefining function as variable.");
-  } else if (isSameScope && (detail.value.type() == typeid(Variable*))) {
-    errorHandler_.add(
-        name.line, " at '" + name.lexeme + "'",
-        "Variable with this name already declared in this scope.");
-  } else if (detail.value.type() == typeid(FunctionParam*)) {
-    // Function body and parameters share the same scope.
-    // Even if in code they don't share the same scope, if a var with
-    // same name is resolved as a function parameter.
-    errorHandler_.add(
-        name.line, " at '" + name.lexeme + "'",
-        "Redefining function parameter.");
+    sym = curScope_->declare(name, getUniqueName(*fn), true, fn, curScope_);
   }
 
-  curScope_->declare(name, var, Scope::LINKAGE_INTERNAL);
-}
-
-void Resolver::declare(const Token& name, FunctionParam* param) {
-  Scope::ScopeDetail detail = curScope_->resolve(name);
-  if (((detail.value.type() == typeid(Variable*)) ||
-      (detail.value.type() == typeid(FunctionParam*))) &&
-      (curScope_->getLevel() == detail.scope->getLevel())) {
-    errorHandler_.add(
-        name.line, " at '" + name.lexeme + "'",
-        "Variable with this name already declared in this scope.");
-  }
-  curScope_->declare(name, param, Scope::LINKAGE_INTERNAL);
-}
-
-bool Resolver::isFunctionDefined(const Token& tok) {
-  auto detail = curScope_->resolve(tok);
-  return getFunction(detail) != nullptr;
-}
-
-bool Resolver::isVariableDefined(const Token& tok) {
-  auto detail = curScope_->resolve(tok);
-  return isVariable(detail);
+  fn->sym = sym;
 }
 
 void Resolver::beginLoop(int* label) {
@@ -135,30 +94,57 @@ void Resolver::copyLoopLabel(int* label) {
   *label = nested_loop_labels_.back();
 }
 
+std::string Resolver::getUniqueName(const Decl& decl, bool hasExternalLinkage) {
+  auto var = std::get_if<Variable>(decl.name.get());
+  if (hasExternalLinkage) {
+    return var->name.toString();
+  } else {
+    return std::format("{}_{}_{}", var->name.toString(), curScope_->getLevel(),
+                       uniqueId_++);
+  }
+}
+
+std::string Resolver::getUniqueName(const Function& fn) {
+  return fn.name.toString();
+}
+
+std::string Resolver::getUniqueName(const FunctionParam& param) {
+  return std::format("{}_{}_{}", param.name.toString(), curScope_->getLevel(),
+                     uniqueId_++);
+}
+
 void Resolver::operator()(Function& fn) {
   // Function definition appears inside another function.
   // Note that function declaration can appear inside another function.
-  Scope::ScopeDetail detail = curScope_->resolve(fn.name);
-  auto pfn = getFunction(detail);
-  if ((pfn && pfn->body != nullptr) && (fn.body != nullptr)) {
-    errorHandler_.add(fn.name.line, " at function " + fn.name.toString(),
-                     "Function already defined.");
-  } else if ((fn.body != nullptr) && (curScope_->getLevel() > 0)) {
+  if ((fn.body != nullptr) && !fn.fileScope) {
     errorHandler_.add(fn.name.line, " at function " + fn.name.toString(),
                       "Function can only be defined at top-level.");
   } else {
-    declare(fn.name, &fn);
-    resolveFunction(fn, FUNCTION);
+    auto sym = curScope_->resolve(fn.name);
+    auto pfn = sym ? sym->getFunction() : nullptr;
+    if ((pfn && pfn->body != nullptr) && (fn.body != nullptr)) {
+      errorHandler_.add(fn.name.line, " at function " + fn.name.toString(),
+                      "Function already defined.");
+    } else {
+      declare(fn.name, &fn);
+      resolveFunction(fn, FUNCTION);
+    }
   }
 }
 
 void Resolver::operator()(FunctionParam& param) {
-  declare(param.name, &param);
-  auto detail = curScope_->resolve(param.name);
-  if (detail.scope != nullptr) {
-    // scope level is used for uniquifying variable names in TackyGen.
-    param.level = detail.scope->getLevel();
+  auto name = param.name;
+  auto sym = curScope_->resolve(name);
+  if (sym && (sym->isVariable() || sym->isFunctionParam()) &&
+      (curScope_->getLevel() == sym->getNestingLevel())) {
+    errorHandler_.add(
+        name.line, " at '" + name.lexeme + "'",
+        "Variable with this name already declared in this scope.");
   }
+
+  sym =
+    curScope_->declare(name, getUniqueName(param), false, &param, curScope_);
+  param.sym = sym;
 }
 
 void Resolver::operator()(const If& ifstmt) {
@@ -170,7 +156,7 @@ void Resolver::operator()(const If& ifstmt) {
 }
 
 void Resolver::operator()(const Block& block) {
-  beginScope<LocalScope>();
+  beginScope();
   resolve(block.stmts);
   endScope();
 }
@@ -206,7 +192,7 @@ void Resolver::operator()(While& loop) {
 
 void Resolver::operator()(For& loop) {
   beginLoop(&loop.loop_label);
-  beginScope<LocalScope>();
+  beginScope();
   if (loop.init) {
     resolve(loop.init.get());
   }
@@ -227,14 +213,59 @@ void Resolver::operator()(For& loop) {
 void Resolver::operator()(const Decl& decl) {
   auto var = std::get_if<Variable>(decl.name.get());
   assert(var != nullptr);
-  // Declare variable name, and set scope level on variable.
-  declare(var->name, var);
-  // Resolve immediately and store reference.
-  var->level = curScope_->getLevel();
-  var->var = curScope_->resolve(var->name);
 
-  if (decl.init != nullptr) {
-    resolve(decl.init.get());
+  if (decl.fileScope) {
+    var->sym = globalScope_->declare(var->name, getUniqueName(decl, true), true,
+                                     var, curScope_);
+  } else {
+    // Declare variable name, and set scope level on variable.
+    Token name = var->name;
+    auto oldsym = curScope_->resolve(name);
+
+    int level = oldsym ? oldsym->getNestingLevel() : -1;
+    bool isSameScope = (curScope_->getLevel() == level);
+    bool isFunctionParam = (oldsym && oldsym->isFunctionParam());
+    bool declHasExternalLinkage = (decl.storage == Scope::STORAGE_EXTERN);
+
+    // found another declaration in the same scope or a function parameter with
+    // a different linkage than this declaration.
+    if ((isFunctionParam || isSameScope) && !(oldsym->hasExternalLinkage() &&
+        declHasExternalLinkage)) {
+        errorHandler_.add(
+            name.line, " at '" + name.lexeme + "'",
+            "Conflicting definitions of variable with different linkages.");
+    }
+
+    if (declHasExternalLinkage) {
+      var->sym = curScope_->declare(name, getUniqueName(decl, true), true, var,
+                                    curScope_);
+      return;
+    }
+
+    if (isSameScope && oldsym->hasExternalLinkage()) {
+        errorHandler_.add(
+            name.line, " at '" + name.lexeme + "'",
+            "Redefining function as variable.");
+    } else if (isSameScope && oldsym->isVariable()) {
+      errorHandler_.add(
+          name.line, " at '" + name.lexeme + "'",
+          "Variable with this name already declared in this scope.");
+    } else if (oldsym && oldsym->isFunctionParam()) {
+      // Function body and parameters share the same scope.
+      // Even if in code they don't share the same scope, if a var with
+      // same name is resolved as a function parameter.
+      errorHandler_.add(
+          name.line, " at '" + name.lexeme + "'",
+          "Redefining function parameter.");
+    }
+
+    // Store resolved reference.
+    var->sym = curScope_->declare(name, getUniqueName(decl, false), false, var,
+                                  curScope_);
+
+    if (decl.init != nullptr) {
+      resolve(decl.init.get());
+    }
   }
 }
 
@@ -290,22 +321,10 @@ void Resolver::operator()(const UnaryExpr& unary) {
 }
 
 void Resolver::operator()(Variable& var) {
-#if 0
-  if (!scopes_.empty()) {
-    auto it = scopes_.back().find(var->name.lexeme);
-    if (it != scopes_.back().end() and it->second == false) {
-      errorHandler_.add(var->name.line, " at '" + var->name.lexeme + "'",
-                       "Cannot read local variable in its own initialiser.");
-    }
-  }
-#endif
-
-  auto detail = curScope_->resolve(var.name);
-  if (detail.scope != nullptr) {
-    // scope level is used for uniquifying variable names in TackyGen.
-    var.level = detail.scope->getLevel();
-    // var is reference to resolved variable.
-    var.var = detail.value;
+  auto sym = curScope_->resolve(var.name);
+  if (sym) {
+    // sym is reference to resolved variable.
+    var.sym = sym;
   } else {
     const auto& id = var.name.toString();
     errorHandler_.add(var.name.line, " at '" + id + "'",
@@ -321,7 +340,7 @@ void Resolver::operator()(Call& call) {
   }
 
   auto detail = curScope_->resolve(callee->name);
-  Function* fn = getFunction(detail);
+  const Function* fn = detail->getFunction();
   if (fn != nullptr) {
     call.fn = fn;
     for (auto& arg : call.args) {

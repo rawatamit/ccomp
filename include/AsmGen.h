@@ -2,6 +2,7 @@
 #define ASMGEN_H
 
 #include "ErrorHandler.h"
+#include "TypeResolver.h"
 #include "ast/Asm.h"
 #include "ast/Tacky.h"
 #include <memory>
@@ -9,11 +10,13 @@
 namespace ccomp {
 class AsmGen {
 public:
-  AsmGen(Tacky* tackycode, ErrorHandler& errorHandler);
+  AsmGen(Tacky* tackycode, const TypeResolver::TypeTable& symtab,
+         ErrorHandler& errorHandler);
   std::shared_ptr<Asm> gen();
 
 private:
   Tacky* tackycode_;
+  const TypeResolver::TypeTable& symtab_;
   ErrorHandler& errorHandler_;
   std::vector<std::shared_ptr<Asm>> instructions_;
   // arguments passed in registers
@@ -29,6 +32,7 @@ private:
 public:
   std::shared_ptr<Asm> operator()(const TackyProgram& Tacky);
   std::shared_ptr<Asm> operator()(const TackyFunction& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyStaticVar& Tacky);
   std::shared_ptr<Asm> operator()(const TackyUnary& Tacky);
   std::shared_ptr<Asm> operator()(const TackyBinary& Tacky);
   std::shared_ptr<Asm> operator()(const TackyConstant& Tacky);

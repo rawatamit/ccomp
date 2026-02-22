@@ -11,8 +11,9 @@ using namespace ccomp;
 
 const std::vector<AsmReg> AsmGen::arg_regs_ = {DI, SI, DX, CX, R8, R9};
 
-AsmGen::AsmGen(Tacky* tackycode, ErrorHandler& errorHandler) :
-  tackycode_(tackycode), errorHandler_(errorHandler)
+AsmGen::AsmGen(Tacky* tackycode, const TypeResolver::TypeTable& symtab,
+   ErrorHandler& errorHandler) :
+  tackycode_(tackycode), symtab_(symtab), errorHandler_(errorHandler)
 {}
 
 std::shared_ptr<Asm> AsmGen::gen() {
@@ -26,7 +27,8 @@ std::shared_ptr<Asm> AsmGen::gen(Tacky* expr) {
   return std::visit(*this, *expr);
 }
 
-std::vector<std::shared_ptr<Asm>> AsmGen::gen(const std::vector<std::shared_ptr<Tacky>>& exprs) {
+std::vector<std::shared_ptr<Asm>> AsmGen::gen(
+  const std::vector<std::shared_ptr<Tacky>>& exprs) {
   for (auto& expr : exprs) {
     gen(expr.get());
   }
@@ -36,11 +38,15 @@ std::vector<std::shared_ptr<Asm>> AsmGen::gen(const std::vector<std::shared_ptr<
 std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
   class ReplacePseudo {
   public:
+    ReplacePseudo(const TypeResolver::TypeTable& symtab) :
+      symtab_(symtab) {}
+
     std::shared_ptr<Asm> fix(Asm* prog) {
       return std::visit(*this, *prog);
     }
 
   private:
+    const TypeResolver::TypeTable& symtab_;
     int fn_stack_size_ = 0;
     std::vector<std::shared_ptr<Asm>> instructions_;
     std::unordered_map<std::string, int> reg_to_offset_;
@@ -69,7 +75,12 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       int stack_size = roundUp(fn_stack_size_, 16);
       auto alloc_stack = make_asm<AsmAllocateStack>(stack_size);
       instructions_.insert(instructions_.begin(), alloc_stack);
-      return make_asm<AsmFunction>(fn.name, std::move(instructions_));
+      return make_asm<AsmFunction>(fn.global, fn.name, std::move(instructions_));
+    }
+
+    std::shared_ptr<Asm> operator()(const AsmStaticVar& svar) {
+      return make_add_and_return<AsmStaticVar>(instructions_, svar.global,
+                                               svar.name, svar.init);
     }
 
     std::shared_ptr<Asm> operator()(const AsmUnary& unary) {
@@ -86,8 +97,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       switch (bin.op.type) {
         case TokenType::PLUS:
         case TokenType::MINUS:
-          if (std::holds_alternative<AsmStack>(*operand1) &&
-              std::holds_alternative<AsmStack>(*operand2)) {
+          if (isMemoryValue(operand1) && isMemoryValue(operand2)) {
             // movl -4(%rbp), %r10d
             // addl %r10d, -8(%rbp)
             auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
@@ -97,7 +107,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
           break;
 
         case TokenType::STAR:
-          if (std::holds_alternative<AsmStack>(*operand2)) {
+          if (isMemoryValue(operand2)) {
             // movl -4(%rbp), %r11d
             // imull $3, %r11d
             // movl %r11d, -4(%rbp)
@@ -117,8 +127,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       auto operand1 = fix_pseudo(cmp.operand1.get());
       auto operand2 = fix_pseudo(cmp.operand2.get());
 
-      if (std::holds_alternative<AsmStack>(*operand1) &&
-          std::holds_alternative<AsmStack>(*operand2)) {
+      if (isMemoryValue(operand1) && isMemoryValue(operand2)) {
         auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
         add_inst<AsmMov>(instructions_, operand1, reg);
         return make_add_and_return<AsmCmp>(instructions_, reg, operand2);
@@ -171,8 +180,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       auto src = fix_pseudo(mov.src.get());
       auto dest = fix_pseudo(mov.dest.get());
 
-      if (std::holds_alternative<AsmStack>(*src) &&
-          std::holds_alternative<AsmStack>(*dest)) {
+      if (isMemoryValue(src) && isMemoryValue(dest)) {
         auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
         add_inst<AsmMov>(instructions_, src, reg);
         return make_add_and_return<AsmMov>(instructions_, reg, dest);
@@ -215,6 +223,15 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       int stack_offset = 0;
       auto it = reg_to_offset_.find(pseudo.identifier);
       if (it == reg_to_offset_.end()) {
+        // Not a stack var. Look in static section.
+        auto sit = symtab_.find(pseudo.identifier);
+        if (sit != symtab_.end()) {
+          auto var = sit->second;
+          if (var->getAttrs()->getAttributeType() == SymbolAttrs::STATIC_ATTR) {
+            return make_asm<AsmData>(pseudo.identifier);
+          }
+        }
+
         fn_stack_size_ += 4;
         // stack locals stored as -ve offset relative to base
         stack_offset = -fn_stack_size_;
@@ -229,18 +246,27 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
     std::shared_ptr<Asm> operator()(const AsmStack& st) {
       return make_asm<AsmStack>(st.offset);
     }
+
+    std::shared_ptr<Asm> operator()(const AsmData& data) {
+      return make_asm<AsmData>(data.identifier);
+    }
   };
 
-  ReplacePseudo fixed_prog;
+  ReplacePseudo fixed_prog(symtab_);
   return fixed_prog.fix(prog);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyProgram& prog) {
-  std::vector<std::shared_ptr<Asm>> fns;
+  std::vector<std::shared_ptr<Asm>> topLevel;
   for (auto& fn : prog.functions) {
-    fns.push_back(gen(fn.get()));
+    topLevel.push_back(gen(fn.get()));
   }
-  return make_asm<AsmProgram>(std::move(fns));
+
+  for (auto& def : prog.defs) {
+    topLevel.push_back(gen(def.get()));
+  }
+
+  return make_asm<AsmProgram>(std::move(topLevel));
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
@@ -274,7 +300,11 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
     gen(p.get());
   }
 
-  return make_asm<AsmFunction>(fn.name, std::move(instructions_));
+  return make_asm<AsmFunction>(fn.global, fn.name, std::move(instructions_));
+}
+
+std::shared_ptr<Asm> AsmGen::operator()(const TackyStaticVar& svar) {
+  return make_asm<AsmStaticVar>(svar.global, svar.name, svar.init);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {

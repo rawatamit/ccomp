@@ -10,6 +10,7 @@
 namespace ccomp {
 class TackyProgram;
 class TackyFunction;
+class TackyStaticVar;
 class TackyUnary;
 class TackyBinary;
 class TackyConstant;
@@ -21,23 +22,35 @@ class TackyJumpIfZero;
 class TackyJumpIfNotZero;
 class TackyLabel;
 class TackyFunCall;
-using Tacky = std::variant<TackyProgram, TackyFunction, TackyUnary, TackyBinary, TackyConstant, TackyVar, TackyReturn, TackyCopy, TackyJump, TackyJumpIfZero, TackyJumpIfNotZero, TackyLabel, TackyFunCall>;
+using Tacky = std::variant<TackyProgram, TackyFunction, TackyStaticVar, TackyUnary, TackyBinary, TackyConstant, TackyVar, TackyReturn, TackyCopy, TackyJump, TackyJumpIfZero, TackyJumpIfNotZero, TackyLabel, TackyFunCall>;
 class TackyProgram {
 public: 
-  TackyProgram(std::vector<std::shared_ptr<Tacky>> functions) :
-    functions(std::move(functions)) {}
+  TackyProgram(std::vector<std::shared_ptr<Tacky>> functions, std::vector<std::shared_ptr<Tacky>> defs) :
+    functions(std::move(functions)), defs(std::move(defs)) {}
 public: 
   std::vector<std::shared_ptr<Tacky>> functions;
+  std::vector<std::shared_ptr<Tacky>> defs;
 };
 
 class TackyFunction {
 public: 
-  TackyFunction(Token name, std::vector<std::shared_ptr<Tacky>> params, std::vector<std::shared_ptr<Tacky>> instructions) :
-    name(name), params(std::move(params)), instructions(std::move(instructions)) {}
+  TackyFunction(bool global, std::string name, std::vector<std::shared_ptr<Tacky>> params, std::vector<std::shared_ptr<Tacky>> instructions) :
+    global(global), name(name), params(std::move(params)), instructions(std::move(instructions)) {}
 public: 
-  Token name;
+  bool global;
+  std::string name;
   std::vector<std::shared_ptr<Tacky>> params;
   std::vector<std::shared_ptr<Tacky>> instructions;
+};
+
+class TackyStaticVar {
+public: 
+  TackyStaticVar(bool global, std::string name, int init) :
+    global(global), name(name), init(init) {}
+public: 
+  bool global;
+  std::string name;
+  int init;
 };
 
 class TackyUnary {

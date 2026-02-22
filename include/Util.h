@@ -3,9 +3,6 @@
 
 #include "Token.h"
 #include "ast/Asm.h"
-#include "ast/Expr.h"
-#include "ast/Stmt.h"
-#include <format>
 #include <memory>
 #include <vector>
 #include <algorithm>
@@ -27,18 +24,8 @@ inline bool isLogicalOp(TokenType op) {
                 TokenType::PIPE_PIPE});
 }
 
-inline std::string toStr(const Function& fn) {
-  return fn.name.toString();
-}
-
-inline std::string toStr(const Variable& var) {
-  int level = var.level;
-  return std::format("{}_scope_level{}", var.name.toString(), level);
-}
-
-inline std::string toStr(const FunctionParam& var) {
-  int level = var.level;
-  return std::format("{}_scope_level{}", var.name.toString(), level);
+inline bool isStorageQualifier(const Token& tok) {
+  return (tok.type == TokenType::STATIC || tok.type == TokenType::EXTERN);
 }
 
 // From https://stackoverflow.com/a/3407254
@@ -60,23 +47,27 @@ inline int roundUp(int num, int multiple) {
 }
 
 template<typename T, typename... Args>
-std::shared_ptr<Asm> make_asm(Args&&... args)
-{ return std::make_shared<Asm>(T(std::forward<Args>(args)...)); }
+std::shared_ptr<Asm> make_asm(Args&&... args) {
+  return std::make_shared<Asm>(T(std::forward<Args>(args)...));
+}
 
 template<typename T, typename... Args>
-void add_inst(std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args)
-{
+void add_inst(std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args) {
   auto inst = std::make_shared<Asm>(T(std::forward<Args>(args)...));
   instructions.emplace_back(inst);
 }
 
 template<typename T, typename... Args>
 std::shared_ptr<Asm> make_add_and_return(
-  std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args)
-{
+  std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args) {
   auto inst = std::make_shared<Asm>(T(std::forward<Args>(args)...));
   instructions.emplace_back(inst);
   return inst;
+}
+
+inline bool isMemoryValue(std::shared_ptr<Asm> inst) {
+  return (std::holds_alternative<AsmData>(*inst) ||
+          std::holds_alternative<AsmStack>(*inst));
 }
 }
 

@@ -23,6 +23,7 @@ private:
 public:
   std::string operator()(const AsmProgram& Asm);
   std::string operator()(const AsmFunction& Asm);
+  std::string operator()(const AsmStaticVar& Asm);
   std::string operator()(const AsmUnary& Asm);
   std::string operator()(const AsmBinary& bin);
   std::string operator()(const AsmCmp& cmp);
@@ -42,6 +43,7 @@ public:
   std::string operator()(const AsmRegister& Asm);
   std::string operator()(const AsmPseudo& Asm);
   std::string operator()(const AsmStack& Asm);
+  std::string operator()(const AsmData& Asm);
 };
 }
 

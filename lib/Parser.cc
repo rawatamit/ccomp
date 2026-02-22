@@ -1,6 +1,9 @@
 #include "Parser.h"
+#include "Util.h"
 #include "ErrorHandler.h"
 #include "Token.h"
+#include <cassert>
+#include <algorithm>
 #include <stdexcept>
 
 using namespace ccomp;
@@ -11,25 +14,32 @@ ParseError::ParseError(std::string msg, Token token)
 Parser::Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler)
     : current(0), tokens_(tokens), errorHandler_(errorHandler) {}
 
-std::unique_ptr<Stmt> Parser::declaration() {
-  try {
-    if (match({TokenType::INT})) {
-      Token name = consume(TokenType::IDENTIFIER, "Expected identifier after type.");
-      if (peek().type == TokenType::LEFT_PAREN) {
-        return function(name);
-      } else {
-        return varDeclaration(name);
-      }
-    } else {
-      return statement();
+std::vector<std::unique_ptr<Stmt>> Parser::parse() {
+  std::vector<std::unique_ptr<Stmt>> stmts;
+
+  while (!isAtEnd()) {
+    try {
+      stmts.push_back(declaration(true));
+    } catch (const ParseError &e) {
+      synchronize();
     }
-  } catch (const ParseError &e) {
-    synchronize();
   }
-  return nullptr;
+
+  return stmts;
 }
 
-std::unique_ptr<Stmt> Parser::function(Token name) {
+std::unique_ptr<Stmt> Parser::declaration(bool fileScope) {
+  std::vector<Token> qualifiers = parseQualifiers();
+  Token name = consume(TokenType::IDENTIFIER,
+                       "Expected identifier in declaration.");
+  if (peek().type == TokenType::LEFT_PAREN) {
+    return function(fileScope, name, qualifiers);
+  }
+
+  return varDeclaration(fileScope, false, name, qualifiers);
+}
+
+std::unique_ptr<Stmt> Parser::function(bool fileScope, Token name, const std::vector<Token>& qualifiers) {
   consume(TokenType::LEFT_PAREN, "expect '(' after function name.");
 
   std::vector<std::unique_ptr<Stmt>> params;
@@ -59,26 +69,35 @@ std::unique_ptr<Stmt> Parser::function(Token name) {
   }
 
   consume(TokenType::RIGHT_PAREN, "Expected ')' after parameters.");
+  
+  Scope::StorageClass storageClass = getStorageClass(true, qualifiers);
   // function declaration
   if (match({TokenType::SEMICOLON})) {
-    return std::make_unique<Stmt>(Function(name, std::move(params), nullptr));
+    return std::make_unique<Stmt>(Function(fileScope, getType(qualifiers),
+      storageClass, name, std::move(params), nullptr));
   } else {
     // function definition
     consume(TokenType::LEFT_BRACE, "Expected '{' before function body.");
     auto body = blockStatement();
-    return std::make_unique<Stmt>(Function(name, std::move(params), std::move(body)));
+    return std::make_unique<Stmt>(Function(fileScope, getType(qualifiers),
+      storageClass, name, std::move(params), std::move(body)));
   }
 }
 
-std::unique_ptr<Stmt> Parser::varDeclaration(Token name) {
+std::unique_ptr<Stmt> Parser::varDeclaration(
+  bool fileScope, bool loopDecl, Token name,
+  const std::vector<Token>& qualifiers) {
   std::unique_ptr<Expr> init;
   if (match({TokenType::EQUAL})) {
     init = expression();
   }
 
   consume(TokenType::SEMICOLON, "expect ';' after var declaration.");
+  Scope::StorageClass storageClass =
+    getStorageClass(false, qualifiers);
   return std::make_unique<Stmt>(
-    Decl(std::make_unique<Expr>(Variable(name)), std::move(init)));
+    Decl(fileScope, loopDecl, getType(qualifiers), storageClass,
+      std::make_unique<Expr>(Variable(name)), std::move(init)));
 }
 
 std::unique_ptr<Stmt> Parser::statement() {
@@ -162,19 +181,14 @@ std::unique_ptr<Stmt> Parser::forStatement() {
 
   // init can be a declaration or statment
   std::unique_ptr<Stmt> init = nullptr;
-  switch (peek().type) {
-  case TokenType::INT: {
-    match({TokenType::INT});
+  if (isDeclarationFirstSet()) {
+    std::vector<Token> qualifiers = parseQualifiers();
     Token name = consume(TokenType::IDENTIFIER, "Expected identifier after type.");
-    init = varDeclaration(name);
-    break;
-  }
-  case TokenType::SEMICOLON:
-    consume(TokenType::SEMICOLON, "Expected ';' in init");
-    break;
-  default:
+    init = varDeclaration(false, true, name, qualifiers);
+  } else if (!check(TokenType::SEMICOLON)) {
     init = expressionStatement();
-    break;
+  } else {
+    consume(TokenType::SEMICOLON, "Expected ';' in init");
   }
 
   // condition can be missing. if missing, it should default to true.
@@ -200,7 +214,11 @@ std::unique_ptr<Stmt> Parser::blockStatement() {
   std::vector<std::unique_ptr<Stmt>> stmts;
 
   while (!check(TokenType::RIGHT_BRACE) and !isAtEnd()) {
-    stmts.push_back(declaration());
+    if (isDeclarationFirstSet()) {
+      stmts.emplace_back(declaration(false));
+    } else {
+      stmts.emplace_back(statement());
+    }
   }
 
   consume(TokenType::RIGHT_BRACE, "Expected '}' after block");
@@ -378,18 +396,6 @@ std::unique_ptr<Expr> Parser::primary() {
   return nullptr;
 }
 
-std::vector<std::unique_ptr<Stmt>> Parser::parse() {
-  std::vector<std::unique_ptr<Stmt>> stmts;
-
-  while (!isAtEnd()) {
-    consume(TokenType::INT, "Expected type in function declaration.");
-    Token name = consume(TokenType::IDENTIFIER, "Expected identifier after type.");
-    stmts.push_back(function(name));
-  }
-
-  return stmts;
-}
-
 Token Parser::consume(TokenType type, const std::string &message) {
   if (check(type))
     return advance();
@@ -423,9 +429,9 @@ Token Parser::advance() {
   return previous();
 }
 
-Token Parser::peek() { return tokens_[current]; }
+Token Parser::peek() const { return tokens_[current]; }
 
-bool Parser::isAtEnd() { return peek().type == TokenType::END_OF_FILE; }
+bool Parser::isAtEnd() const { return peek().type == TokenType::END_OF_FILE; }
 
 bool Parser::check(TokenType type) {
   if (isAtEnd())
@@ -454,4 +460,86 @@ void Parser::synchronize() {
 
     advance();
   }
+}
+
+std::vector<Token> Parser::parseQualifiers() {
+  std::vector<Token> qualifiers;
+  while (isDeclarationFirstSet()) {
+    qualifiers.emplace_back(advance());
+  }
+
+  if (qualifiers.empty()) {
+    error(peek(), "Expected qualifier in declaration.");
+  } else {
+    bool type_qualifier = false;
+    bool storage_qualifier = false;
+    for (Token& tok : qualifiers) {
+      if (isStorageQualifier(tok)) {
+        if (storage_qualifier) {
+          error(tok, "Multiple storage qualifiers in declaration.");
+        }
+
+        storage_qualifier = true;
+      }
+
+      if (tok.type == TokenType::INT) {
+        type_qualifier = true;
+      }
+    }
+
+    if (!type_qualifier) {
+      error(peek(), "Expected type qualifier in declaration.");
+    }
+  }
+
+  return qualifiers;
+}
+
+bool Parser::isDeclarationFirstSet() const {
+  static std::vector<TokenType> firstSet =
+    {TokenType::INT, TokenType::STATIC, TokenType::EXTERN};
+
+  if (!isAtEnd()) {
+    auto it = std::find(firstSet.begin(), firstSet.end(), peek().type);
+    return it != firstSet.end();
+  }
+
+  return false;
+}
+
+bool Parser::isTypeQualifier(const Token& tok) const {
+  return (tok.type == TokenType::INT);
+}
+
+Token Parser::getType(const std::vector<Token>& qualifiers) const {
+  for (const Token& tok : qualifiers) {
+    if (isTypeQualifier(tok)) {
+      return tok;
+    }
+  }
+
+  assert(0);
+}
+
+Scope::StorageClass Parser::getStorageClass(
+  bool isFunction, const std::vector<Token>& qualifiers) const {
+  // Functions have extern storage class by default. Variables have default
+  // storage class of auto even if they are defined at file scope. If qualifier
+  // list contains a qualification, pick that.
+  Scope::StorageClass storageClass =
+    isFunction ? Scope::STORAGE_EXTERN : Scope::STORAGE_AUTO;
+  Scope::StorageClass computedClass = getStorageClass(qualifiers);
+  return (computedClass != Scope::STORAGE_AUTO) ? computedClass : storageClass;
+}
+
+Scope::StorageClass Parser::getStorageClass(
+  const std::vector<Token>& qualifiers) const {
+  for (const Token& tok : qualifiers) {
+    if (isStorageQualifier(tok)) {
+      return (tok.type == TokenType::EXTERN) ?
+              Scope::STORAGE_EXTERN : Scope::STORAGE_STATIC;
+    }
+  }
+
+  return Scope::STORAGE_AUTO;
 }

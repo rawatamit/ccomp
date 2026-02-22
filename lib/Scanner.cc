@@ -21,6 +21,8 @@ Scanner::Scanner(const std::string &aSource, ErrorHandler &aErrorHandler)
   reservedKeywords["do"] = TokenType::DO;
   reservedKeywords["break"] = TokenType::BREAK;
   reservedKeywords["continue"] = TokenType::CONTINUE;
+  reservedKeywords["static"] = TokenType::STATIC;
+  reservedKeywords["extern"] = TokenType::EXTERN;
 }
 
 char Scanner::advanceAndGetChar() {

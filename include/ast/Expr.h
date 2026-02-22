@@ -4,7 +4,6 @@
 #include "Token.h"
 #include "Scope.h"
 #include "Type.h"
-#include <any>
 #include <memory>
 #include <string>
 #include <vector>
@@ -72,9 +71,8 @@ public:
     name(name) {}
 public: 
   Token name;
-  std::any var;
-  int level;
-  const Type* evalty;
+  std::shared_ptr<Symbol> sym;
+  const Type* evalty=0;
 };
 
 class Call {
@@ -84,7 +82,7 @@ public:
 public: 
   std::unique_ptr<Expr> callee;
   std::vector<std::unique_ptr<Expr>> args;
-  Function* fn;
+  const Function* fn=0;
 };
 
 } // end namespace

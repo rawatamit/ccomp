@@ -13,6 +13,9 @@ add_library(ccomplib
             ErrorHandler.cc
             Parser.cc
             Type.cc
+            Scope.cc
+            Symbol.cc
+            SymbolTable.cc
             Resolver.cc
             TypeResolver.cc
             TackyGen.cc

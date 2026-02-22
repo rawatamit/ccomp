@@ -1,6 +1,5 @@
 #include "TackyGen.h"
 #include "Token.h"
-//#include "ast/Asm.h"
 #include "ast/Tacky.h"
 #include "Util.h"
 #include <cassert>
@@ -10,8 +9,9 @@
 
 using namespace ccomp;
 
-TackyGen::TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts, ErrorHandler &errorHandler) :
-  stmts_(stmts), errorHandler_(errorHandler)
+TackyGen::TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts,
+                   const TypeResolver::TypeTable& symtab, ErrorHandler& errorHandler) :
+  stmts_(stmts), symtab_(symtab), errorHandler_(errorHandler)
 {}
 
 std::shared_ptr<Tacky> TackyGen::gen() {
@@ -23,7 +23,24 @@ std::shared_ptr<Tacky> TackyGen::gen() {
       fns.emplace_back(fn);
     }
   }
-  return make_tacky<TackyProgram>(fns);
+
+  std::vector<std::shared_ptr<Tacky>> defs;
+  for (auto entry : symtab_) {
+    auto sym = entry.second;
+    const SymbolAttrs* attrs = sym->getAttrs();
+    if (attrs->getAttributeType() == SymbolAttrs::STATIC_ATTR) {
+      const InitialValue& initValue = attrs->getInitValue();
+      if (initValue.getType() == InitialValue::INITIAL_VALUE) {
+        defs.emplace_back(make_tacky<TackyStaticVar>(
+            attrs->isGlobal(), sym->getName(), initValue.getValue()));
+      } else if (initValue.getType() == InitialValue::TENTATIVE_VALUE) {
+        defs.emplace_back(make_tacky<TackyStaticVar>(
+            attrs->isGlobal(), sym->getName(), 0));
+      }
+    }
+  }
+
+  return make_tacky<TackyProgram>(fns, defs);
 }
 
 std::shared_ptr<Tacky> TackyGen::gen(Expr* expr) {
@@ -82,15 +99,18 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Function& fn) {
 
     // return 0 statement added to every function
     instructions_.emplace_back(
-      make_tacky<TackyReturn>(make_tacky<TackyConstant>(0)));
-    return make_tacky<TackyFunction>(fn.name, std::move(params), std::move(instructions_));
+        make_tacky<TackyReturn>(make_tacky<TackyConstant>(0)));
+    bool isGlobal = fn.sym->getAttrs()->isGlobal();
+    return make_tacky<TackyFunction>(isGlobal, fn.sym->getName(),
+                                     std::move(params),
+                                     std::move(instructions_));
   }
 
   return nullptr;
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const FunctionParam& param) {
-  return make_tacky<TackyVar>(toStr(param));
+  return make_tacky<TackyVar>(param.sym->getName());
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const If& ifstmt) {
@@ -231,6 +251,13 @@ std::shared_ptr<Tacky> TackyGen::operator()(const For& loop) {
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Decl& decl) {
+  // file scope, extern, and static declarations are handled by symtab
+  // iteration.
+  if (decl.fileScope || ((decl.storage == Scope::STORAGE_STATIC) ||
+                         (decl.storage == Scope::STORAGE_EXTERN))) {
+    return nullptr;
+  }
+
   if (auto& init = decl.init) {
     // lvalue is Var(v)
     auto dst = gen(decl.name.get());
@@ -419,7 +446,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const UnaryExpr& expr) {
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Variable& var) {
-  return make_tacky<TackyVar>(toStr(var));
+  return make_tacky<TackyVar>(var.sym->getName());
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Call& call) {

@@ -2,10 +2,8 @@
 #define SCOPE_H
 
 #include "Token.h"
-#include <any>
+#include "SymbolTable.h"
 #include <memory>
-#include <string>
-#include <unordered_map>
 
 namespace ccomp {
 class Variable;
@@ -14,75 +12,39 @@ class FunctionParam;
 
 class Scope {
 public:
-  enum Linkage {
-    LINKAGE_INTERNAL = 0,
-    LINKAGE_EXTERNAL,
-    LINKAGE_ERROR,
+  enum StorageClass {
+    STORAGE_STATIC = 0,
+    STORAGE_EXTERN,
+    STORAGE_AUTO,
   };
-
-  struct ScopeDetail {
-    std::shared_ptr<Scope> scope;
-    std::any value;
-    Linkage linkage;
-  };
-
-protected:
-  Scope(std::shared_ptr<Scope> enclosingScope) :
-    level_(enclosingScope ? (enclosingScope->getLevel() + 1) : 0),
-    enclosingScope_(enclosingScope) {}
 
 public:
-  virtual ~Scope() {}
+  Scope();
+  Scope(std::shared_ptr<Scope> enclosingScope);
+  virtual ~Scope() = default;
 
-  void declare(const Token& name, std::any obj, Linkage linkage) {
-    identifiers_[name.lexeme] =
-      ScopeDetail(std::make_shared<Scope>(*this), obj, linkage);
-  }
+  std::shared_ptr<Symbol> declare(const Token& name,
+                                  const std::string& uniqueName,
+                                  bool hasExternalLinkage,
+                                  Function* fn, std::shared_ptr<Scope> scope);
+  std::shared_ptr<Symbol> declare(const Token& name,
+                                  const std::string& uniqueName,
+                                  bool hasExternalLinkage,
+                                  FunctionParam* param,
+                                  std::shared_ptr<Scope> scope);
+  std::shared_ptr<Symbol> declare(const Token& name,
+                                  const std::string& uniqueName,
+                                  bool hasExternalLinkage,
+                                  Variable* var, std::shared_ptr<Scope> scope);
 
-  std::shared_ptr<Scope> getEnclosingScope() const {
-    return enclosingScope_;
-  }
-
-  int getLevel() const {
-    return level_;
-  }
-
-  ScopeDetail resolve(const Token& name) const {
-    auto it = identifiers_.find(name.lexeme);
-    // it = [scope, <id, linkage>]
-    if (it != identifiers_.end()) {
-      // scope, id
-      return it->second;
-    }
-
-    if (auto scope = getEnclosingScope()) {
-      return scope->resolve(name);
-    }
-
-    return {nullptr, false, LINKAGE_ERROR};
-  }
+  std::shared_ptr<Scope> getEnclosingScope() const;
+  int getLevel() const;
+  std::shared_ptr<Symbol> resolve(const Token& name) const;
 
 private:
   int level_ = -1;
   std::shared_ptr<Scope> enclosingScope_;
-  std::unordered_map<std::string, ScopeDetail> identifiers_;
-};
-
-struct GlobalScope : public Scope {
-  GlobalScope() :
-    Scope(nullptr) {}
-};
-
-struct FunctionScope : public Scope {
-  FunctionScope(std::shared_ptr<Scope> scope) :
-    Scope(scope)
-  {}
-};
-
-struct LocalScope : public Scope {
-  LocalScope(std::shared_ptr<Scope> scope) :
-    Scope(scope)
-  {}
+  SymbolTable table_;
 };
 } // namespace ccomp
 

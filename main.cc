@@ -80,8 +80,8 @@ static int compile(const std::string &source, const char *outputpath,
     return 65;
   }
 
-  ccomp::TypeResolver tyresolver(errorHandler);
-  tyresolver.resolve(stmts);
+  ccomp::TypeResolver tycheck(errorHandler);
+  const ccomp::TypeResolver::TypeTable& symtab = tycheck.typecheck(stmts);
   if (errorHandler.foundError) {
     errorHandler.report();
     return 65;
@@ -93,7 +93,7 @@ static int compile(const std::string &source, const char *outputpath,
   }
 
   /// tackygen
-  ccomp::TackyGen tackygen(stmts, errorHandler);
+  ccomp::TackyGen tackygen(stmts, symtab, errorHandler);
   auto tackyasm = tackygen.gen();
   // if found error during parsing, report
   if (errorHandler.foundError) {
@@ -107,7 +107,7 @@ static int compile(const std::string &source, const char *outputpath,
   }
 
   /// asmgen
-  ccomp::AsmGen asmgen(tackyasm.get(), errorHandler);
+  ccomp::AsmGen asmgen(tackyasm.get(), symtab, errorHandler);
   auto progasm = asmgen.gen();
   // if found error during parsing, report
   if (errorHandler.foundError) {

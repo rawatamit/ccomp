@@ -2,6 +2,7 @@
 #define TACKYGEN_H
 
 #include "ErrorHandler.h"
+#include "TypeResolver.h"
 #include "ast/Tacky.h"
 #include "ast/Expr.h"
 #include "ast/Stmt.h"
@@ -9,12 +10,14 @@
 namespace ccomp {
 class TackyGen {
 public:
-  TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts, ErrorHandler& errorHandler);
+  TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts,
+           const TypeResolver::TypeTable& symtab, ErrorHandler& errorHandler);
   std::shared_ptr<Tacky> gen();
 
 private:
   const std::vector<std::unique_ptr<Stmt>>& stmts_;
   std::vector<std::shared_ptr<Tacky>> instructions_;
+  const TypeResolver::TypeTable& symtab_;
   ErrorHandler& errorHandler_;
 
   std::shared_ptr<Tacky> gen(Expr* expr);
@@ -46,7 +49,6 @@ public:
   std::shared_ptr<Tacky> operator()(const Null& stmt);
   std::shared_ptr<Tacky> operator()(const Break& stmt);
   std::shared_ptr<Tacky> operator()(const Continue& stmt);
-
   std::shared_ptr<Tacky> operator()(const Conditional& expr);
   std::shared_ptr<Tacky> operator()(const BinaryExpr& expr);
   std::shared_ptr<Tacky> operator()(const LiteralExpr& expr);

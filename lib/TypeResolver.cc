@@ -9,67 +9,101 @@ TypeResolver::TypeResolver(ErrorHandler& errorHandler) :
   errorHandler_(errorHandler)
 {}
 
-void TypeResolver::resolve(const std::vector<std::unique_ptr<Stmt>>& prog) {
+const TypeResolver::TypeTable& TypeResolver::typecheck(const std::vector<std::unique_ptr<Stmt>>& prog) {
   for (auto& stmt : prog) {
-    gettype(stmt.get());
+    typecheck(stmt.get());
   }
+
+  return symtab_;
 }
 
-const Type* TypeResolver::gettype(Expr* expr) {
+const Type* TypeResolver::typecheck(Expr* expr) {
   return std::visit(*this, *expr);
 }
 
-const Type* TypeResolver::gettype(Stmt* stmt) {
+const Type* TypeResolver::typecheck(Stmt* stmt) {
   return std::visit(*this, *stmt);
+}
+
+void TypeResolver::add(const std::string& name, std::shared_ptr<Symbol> sym,
+                       const Type* ty, std::unique_ptr<SymbolAttrs> attrs) {
+  sym->setType(ty);
+  sym->setAttrs(std::move(attrs));
+  symtab_[name] = sym;
 }
 
 const Type* TypeResolver::operator()(const Block& block) {
   for (auto& stmt : block.stmts) {
-    gettype(stmt.get());
+    typecheck(stmt.get());
   }
 
   return nullptr;
 }
 
 const Type* TypeResolver::operator()(const Expression& stmt) {
-  return gettype(stmt.expr.get());
+  return typecheck(stmt.expr.get());
 }
 
 const Type* TypeResolver::operator()(Function& fn) {
   std::vector<const Type*> paramTypes;
   for (auto& param : fn.params) {
-    //auto param_stmt = Stmt(param);
-    paramTypes.emplace_back(gettype(param.get()));
+    paramTypes.emplace_back(typecheck(param.get()));
   }
 
-  // NOTE: all functions return an integer.
-  fn.evalty = std::make_unique<FunctionType>(BuiltInType::getInt32Ty(), paramTypes);
+  auto fnstr = fn.sym->getName();
+  if (!fn.fileScope && (fn.storage == Scope::STORAGE_STATIC)) {
+    errorHandler_.add(0,
+                      " function " + fnstr,
+                      "Static function declaration inside local scope.");
+  }
 
-  // Is function already in symbol table?
-  auto fnstr = toStr(fn);
-  auto fnit = tytab_.find(fnstr);
-  const Type* oldty = (fnit != tytab_.end()) ? fnit->second : nullptr;
-  if (oldty) {
-    if (auto fty = dynamic_cast<const FunctionType*>(oldty)) {
-      if (*fty != *fn.evalty.get()) {
+  bool isGlobal = (fn.storage != Scope::STORAGE_STATIC);
+  bool alreadyDefined = false;
+
+  // NOTE: all functions return an integer.
+  const FunctionType* fty =
+    new FunctionType(BuiltInType::getInt32Ty(), paramTypes);
+  fn.evalty = std::make_unique<FunctionType>(
+    FunctionType(BuiltInType::getInt32Ty(), paramTypes));
+
+  auto oldDecl = symtab_.find(fnstr);
+  if (oldDecl != symtab_.end()) {
+    // Function in symbol table.
+    const Type* oldty = oldDecl->second->getType();
+    if (auto oldfty = dynamic_cast<const FunctionType*>(oldty)) {
+      if (*oldfty != *fty) {
         errorHandler_.add(0,
-                          " function type " + fnstr,
+                          " function " + fnstr,
                           "Redeclaration with different type.");
       }
     } else {
       errorHandler_.add(0,
-                        " function type " + fnstr,
+                        " function " + fnstr,
                         "Redeclaration as function.");
     }
-  } else {
-    tytab_[fnstr] = fn.evalty.get();
+
+    bool isOldDeclGlobal = oldDecl->second->getAttrs()->isGlobal();
+    if (isOldDeclGlobal && (fn.storage == Scope::STORAGE_STATIC)) {
+      errorHandler_.add(0,
+                        " function " + fnstr,
+                        "Redeclaration with different storage class.");
+    }
+
+    // if a previous declaration was static, and this declaration is extern,
+    // this function is viewed as static
+    isGlobal = isOldDeclGlobal;
+    // has this function already defined
+    alreadyDefined = oldDecl->second->getAttrs()->isDefined();
   }
+
+  add(fnstr, fn.sym, fn.evalty.get(),
+      std::make_unique<SymbolAttrs>(alreadyDefined || fn.body, isGlobal));
 
   if (auto& body = fn.body) {
-    gettype(body.get());
+    typecheck(body.get());
   }
 
-  return fn.evalty.get();
+  return fty;
 }
 
 const Type* TypeResolver::operator()(FunctionParam& param) {
@@ -79,7 +113,7 @@ const Type* TypeResolver::operator()(FunctionParam& param) {
 }
 
 const Type* TypeResolver::operator()(const If& ifstmt) {
-  auto condty = gettype(ifstmt.condition.get());
+  auto condty = typecheck(ifstmt.condition.get());
   if ((condty != BuiltInType::getBoolTy()) &&
       (condty != BuiltInType::getInt32Ty())) {
     errorHandler_.add(0,
@@ -87,64 +121,182 @@ const Type* TypeResolver::operator()(const If& ifstmt) {
                       "Boolean type expected.");
   }
 
-  gettype(ifstmt.thenBranch.get());
+  typecheck(ifstmt.thenBranch.get());
   if (auto& elseExp = ifstmt.elseBranch) {
-    gettype(elseExp.get());
+    typecheck(elseExp.get());
   }
+
   return nullptr;
 }
 
 const Type* TypeResolver::operator()(const Return& stmt) {
-  return gettype(stmt.value.get());
+  return typecheck(stmt.value.get());
 }
 
 const Type* TypeResolver::operator()(const DoWhile& loop) {
   if (auto& cond = loop.condition) {
-    gettype(cond.get());
+    typecheck(cond.get());
   }
 
-  gettype(loop.body.get());
+  typecheck(loop.body.get());
   return nullptr;
 }
 
 const Type* TypeResolver::operator()(const While& loop) {
   if (auto& cond = loop.condition) {
-    gettype(cond.get());
+    typecheck(cond.get());
   }
 
-  gettype(loop.body.get());
+  typecheck(loop.body.get());
   return nullptr;
 }
 
 const Type* TypeResolver::operator()(const For& loop) {
   if (auto& init = loop.init) {
-    gettype(init.get());
+    typecheck(init.get());
   }
 
   if (auto& cond = loop.condition) {
-    gettype(cond.get());
+    typecheck(cond.get());
   }
 
   if (auto& post = loop.post) {
-    gettype(post.get());
+    typecheck(post.get());
   }
 
-  gettype(loop.body.get());
+  typecheck(loop.body.get());
   return nullptr;
 }
 
-const Type* TypeResolver::operator()(const Decl& decl) {
-  auto namety = gettype(decl.name.get());
+const Type* TypeResolver::typecheckFileScopeDecl(const Decl& decl) {
+  const Variable* var = std::get_if<Variable>(decl.name.get());
+  std::string declstr = var->sym->getName();
+  const Type* ty = BuiltInType::getInt32Ty();
+  InitialValue initValue;
+
   if (auto& init = decl.init) {
-    auto initty = gettype(init.get());
-    if (namety != initty) {
+    if (auto constval = std::get_if<LiteralExpr>(init.get())) {
+      initValue = InitialValue(InitialValue::INITIAL_VALUE,
+                                std::stoi(constval->value));
+    } else {
       errorHandler_.add(0,
                         " at declaration",
-                        "Type mismatch between name and init.");
+                        "Non-const initializer.");
+    }
+  } else {
+    if (decl.storage == Scope::STORAGE_EXTERN) {
+      initValue = InitialValue(InitialValue::NOINIT_VALUE);
+    } else {
+      initValue = InitialValue(InitialValue::TENTATIVE_VALUE);
     }
   }
 
-  return namety;
+  bool isGlobal = (decl.storage != Scope::STORAGE_STATIC);
+  auto oldDecl = symtab_.find(declstr);
+
+  if (oldDecl != symtab_.end()) {
+    const Type* oldty = oldDecl->second->getType();
+    // old type is not Int
+    if (oldty != BuiltInType::getInt32Ty()) {
+      errorHandler_.add(0,
+                        " declaration " + declstr,
+                        "Function redeclared as variable.");
+    }
+
+    // if a previous declaration was static, and this declaration is extern,
+    // this declaration is viewed as static
+    bool isOldDeclGlobal = oldDecl->second->getAttrs()->isGlobal();
+    if (decl.storage == Scope::STORAGE_EXTERN) {
+      isGlobal = isOldDeclGlobal;
+    } else if (isOldDeclGlobal != isGlobal) {
+      errorHandler_.add(0,
+                        " declaration " + declstr,
+                        "Conflicting linkage for declaration.");
+    }
+
+    InitialValue oldInitValue = oldDecl->second->getAttrs()->getInitValue();
+    if (oldInitValue.getType() == InitialValue::INITIAL_VALUE) {
+      if (initValue.getType() == InitialValue::INITIAL_VALUE) {
+        errorHandler_.add(0,
+                          " declaration " + declstr,
+                          "Conflicting file scope variable definitions.");
+      } else {
+        initValue = oldInitValue;
+      }
+    } else if ((initValue.getType() != InitialValue::INITIAL_VALUE) &&
+                (oldInitValue.getType() == InitialValue::TENTATIVE_VALUE)) {
+      initValue = InitialValue(InitialValue::TENTATIVE_VALUE);
+    }
+  }
+
+  add(declstr, var->sym, ty,
+      std::make_unique<SymbolAttrs>(initValue, isGlobal));
+  return ty;
+}
+
+const Type* TypeResolver::typecheckLocalDecl(const Decl& decl) {
+  const Variable* var = std::get_if<Variable>(decl.name.get());
+  std::string declstr = var->sym->getName();
+  const Type* ty = BuiltInType::getInt32Ty();
+
+  if (decl.storage == Scope::STORAGE_EXTERN) {
+    if (decl.init) {
+      errorHandler_.add(0,
+                        " declaration " + declstr,
+                        "Local extern definition has initializer.");
+    }
+
+    auto oldDecl = symtab_.find(declstr);
+    if (oldDecl != symtab_.end()) {
+      const Type* oldty = oldDecl->second->getType();
+      // old type is a function type
+      if (oldty != BuiltInType::getInt32Ty()) {
+        errorHandler_.add(0,
+                          " declaration " + declstr,
+                          "Function redeclared as variable.");
+      }
+    } else {
+      add(declstr, var->sym, ty,
+          std::make_unique<SymbolAttrs>(
+          InitialValue(InitialValue::NOINIT_VALUE), true));
+    }
+  } else if (decl.storage == Scope::STORAGE_STATIC) {
+    if (decl.loopDecl) {
+      errorHandler_.add(0,
+                        " at declaration",
+                        "For loop initializer can't be declared static.");
+    }
+
+    InitialValue initValue;
+    if (decl.init == nullptr) {
+      initValue = InitialValue(0);
+    } else if (auto constval = std::get_if<LiteralExpr>(decl.init.get())) {
+      initValue = InitialValue(InitialValue::INITIAL_VALUE,
+                                std::stoi(constval->value));
+    } else {
+      errorHandler_.add(0,
+                        " at declaration",
+                        "Non-const initializer on local static variable.");
+    }
+
+    add(declstr, var->sym, ty,
+        std::make_unique<SymbolAttrs>(initValue, false));
+  } else {
+    add(declstr, var->sym, ty,
+        std::make_unique<SymbolAttrs>());
+
+    if (auto& init = decl.init) {
+      typecheck(init.get());
+    }
+  }
+
+  return ty;
+}
+
+const Type* TypeResolver::operator()(const Decl& decl) {
+  return (decl.fileScope) ?
+         typecheckFileScopeDecl(decl) :
+         typecheckLocalDecl(decl);
 }
 
 const Type* TypeResolver::operator()(const Null&) {
@@ -160,8 +312,8 @@ const Type* TypeResolver::operator()(const Continue&) {
 }
 
 const Type* TypeResolver::operator()(const Assign& assign) {
-  auto lty = gettype(assign.lvalue.get());
-  auto vty = gettype(assign.value.get());
+  auto lty = typecheck(assign.lvalue.get());
+  auto vty = typecheck(assign.value.get());
 
   if (lty != vty) {
     errorHandler_.add(0,
@@ -173,7 +325,7 @@ const Type* TypeResolver::operator()(const Assign& assign) {
 }
 
 const Type* TypeResolver::operator()(const Conditional& cexpr) {
-  auto condty = gettype(cexpr.condition.get());
+  auto condty = typecheck(cexpr.condition.get());
   if ((condty != BuiltInType::getBoolTy()) &&
       (condty != BuiltInType::getInt32Ty())) {
     errorHandler_.add(0,
@@ -181,8 +333,8 @@ const Type* TypeResolver::operator()(const Conditional& cexpr) {
                       "Boolean type expected.");
   }
 
-  auto thenty = gettype(cexpr.thenExp.get());
-  auto elsety = gettype(cexpr.elseExp.get());
+  auto thenty = typecheck(cexpr.thenExp.get());
+  auto elsety = typecheck(cexpr.elseExp.get());
   if (thenty != elsety) {
     errorHandler_.add(0,
                       " at expression in ternary",
@@ -193,22 +345,14 @@ const Type* TypeResolver::operator()(const Conditional& cexpr) {
 }
 
 const Type* TypeResolver::operator()(const BinaryExpr& expr) {
-  auto tyleft = gettype(expr.left.get());
-  auto tyright = gettype(expr.right.get());
+  auto tyleft = typecheck(expr.left.get());
+  auto tyright = typecheck(expr.right.get());
   if (tyleft != tyright) {
     errorHandler_.add(expr.Operator.line,
                       " at expression " + expr.Operator.toString(),
                       "Type mismatch.");
   }
 
-  #if 0
-  auto optype = expr.Operator.type;
-  if (isLogicalOp(optype) || isRelationalOp(optype)) {
-    return BuiltInType::getBoolTy();
-  } else {
-    return BuiltInType::getInt32Ty();
-  }
-  #endif
   return BuiltInType::getInt32Ty();
 }
 
@@ -218,33 +362,30 @@ const Type* TypeResolver::operator()(const LiteralExpr& expr) {
 }
 
 const Type* TypeResolver::operator()(const UnaryExpr& expr) {
-  return gettype(expr.right.get());
+  return typecheck(expr.right.get());
 }
 
 const Type* TypeResolver::operator()(const Variable& var) {
-  auto varstr = toStr(var);
-  auto it = tytab_.find(varstr);
-  const Type* ty = (it != tytab_.end()) ? it->second : nullptr;
+  auto varstr = var.sym->getName();
+  auto resolvedRef = symtab_.find(varstr);
+  const Type* ty = (resolvedRef != symtab_.end()) ? resolvedRef->second->getType() : nullptr;
 
   if (ty != nullptr) {
     return ty;
-  } else if (var.var.type() == typeid(Function*)) {
-    Function* fn = std::any_cast<Function*>(var.var);
+  } else if (auto fn = var.sym->getFunction()) {
     // Note: calling gettype again on function, will trigger type recomputation.
     ty = fn->evalty.get();
-  } else if (var.var.type() == typeid(FunctionParam*)) {
-    FunctionParam* param = std::any_cast<FunctionParam*>(var.var);
+  } else if (auto param = var.sym->getFunctionParam()) {
     ty = param->evalty;
   } else {
     ty = BuiltInType::getInt32Ty();
   }
 
-  tytab_[varstr] = ty;
   return ty;
 }
 
 const Type* TypeResolver::operator()(const Call& call) {
-  Function* fn = call.fn;
+  const Function* fn = call.fn;
   if (fn->params.size() != call.args.size()) {
     errorHandler_.add(fn->name.line, " at '" + fn->name.toString() + "'",
                       "Call and function args don't match.");

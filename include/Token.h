@@ -61,6 +61,8 @@ enum class TokenType {
   FOR,
   BREAK,
   CONTINUE,
+  STATIC,
+  EXTERN,
 
   ERROR,
   END_OF_FILE

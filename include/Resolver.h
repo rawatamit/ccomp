@@ -3,12 +3,13 @@
 
 #include "ErrorHandler.h"
 #include "Token.h"
-#include "Scope.h"
 #include "ast/Expr.h"
 #include "ast/Stmt.h"
 #include <vector>
 
 namespace ccomp {
+class Scope;
+
 class Resolver {
 private:
   enum FunctionType {
@@ -22,16 +23,10 @@ private:
   std::shared_ptr<Scope> curScope_;
   std::vector<int> nested_loop_labels_;
   int loop_label_;
+  static int uniqueId_;
 
 public:
-  Resolver(ErrorHandler& errorHandler)
-    : errorHandler_(errorHandler),
-      currentFunction_(NONEF),
-      globalScope_(std::make_shared<GlobalScope>()),
-      curScope_(globalScope_),
-      loop_label_(0)
-  {}
-
+  Resolver(ErrorHandler& errorHandler);
   ~Resolver() = default;
   void resolve(const std::vector<std::unique_ptr<Stmt>>& prog);
 
@@ -39,36 +34,19 @@ private:
   void resolve(Stmt* stmt);
   void resolve(Expr* expr);
   void resolveFunction(Function& fn, FunctionType type);
-  Function* getFunction(const Scope::ScopeDetail& detail) const {
-    try {
-      return std::any_cast<Function*>(detail.value);
-    } catch (...) {
-      return nullptr;
-    }
-  }
+  Function* getFunction(const SymbolTable& detail) const;
 
-  bool isVariable(const Scope::ScopeDetail& detail) const {
-    try {
-      return std::any_cast<Variable*>(detail.value) != nullptr;
-    } catch (std::bad_any_cast&) {
-      return std::any_cast<FunctionParam*>(detail.value) != nullptr;
-    } catch (...) {
-      return false;
-    }
-  }
-
-  template<typename T>
-  void beginScope(bool parent=true);
+  void beginScope();
   void endScope();
   void declare(const Token& name, Function* fn);
-  void declare(const Token& name, Variable* var);
-  void declare(const Token& name, FunctionParam* param);
-  bool isFunctionDefined(const Token& tok);
-  bool isVariableDefined(const Token& tok);
 
   void beginLoop(int* label);
   void endLoop();
   void copyLoopLabel(int* label);
+
+  std::string getUniqueName(const Decl& decl, bool hasExternalLinkage);
+  std::string getUniqueName(const Function& fn);
+  std::string getUniqueName(const FunctionParam& param);
 
 public:
   void operator()(const Block& stmt);

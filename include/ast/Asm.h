@@ -10,6 +10,7 @@
 namespace ccomp {
 class AsmProgram;
 class AsmFunction;
+class AsmStaticVar;
 class AsmUnary;
 class AsmBinary;
 class AsmCmp;
@@ -29,7 +30,8 @@ class AsmImm;
 class AsmRegister;
 class AsmPseudo;
 class AsmStack;
-using Asm = std::variant<AsmProgram, AsmFunction, AsmUnary, AsmBinary, AsmCmp, AsmIdiv, AsmCdq, AsmJmp, AsmJmpCC, AsmSetCC, AsmLabel, AsmMov, AsmAllocateStack, AsmDeallocateStack, AsmPush, AsmCall, AsmReturn, AsmImm, AsmRegister, AsmPseudo, AsmStack>;
+class AsmData;
+using Asm = std::variant<AsmProgram, AsmFunction, AsmStaticVar, AsmUnary, AsmBinary, AsmCmp, AsmIdiv, AsmCdq, AsmJmp, AsmJmpCC, AsmSetCC, AsmLabel, AsmMov, AsmAllocateStack, AsmDeallocateStack, AsmPush, AsmCall, AsmReturn, AsmImm, AsmRegister, AsmPseudo, AsmStack, AsmData>;
 enum AsmCondCode {
   E,
   NE,
@@ -64,11 +66,22 @@ public:
 
 class AsmFunction {
 public: 
-  AsmFunction(Token name, std::vector<std::shared_ptr<Asm>> instructions) :
-    name(name), instructions(std::move(instructions)) {}
+  AsmFunction(bool global, std::string name, std::vector<std::shared_ptr<Asm>> instructions) :
+    global(global), name(name), instructions(std::move(instructions)) {}
 public: 
-  Token name;
+  bool global;
+  std::string name;
   std::vector<std::shared_ptr<Asm>> instructions;
+};
+
+class AsmStaticVar {
+public: 
+  AsmStaticVar(bool global, std::string name, int init) :
+    global(global), name(name), init(init) {}
+public: 
+  bool global;
+  std::string name;
+  int init;
 };
 
 class AsmUnary {
@@ -229,6 +242,14 @@ public:
     offset(offset) {}
 public: 
   int offset;
+};
+
+class AsmData {
+public: 
+  AsmData(std::string identifier) :
+    identifier(identifier) {}
+public: 
+  std::string identifier;
 };
 
 } // end namespace

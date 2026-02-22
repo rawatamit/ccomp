@@ -191,10 +191,10 @@ int main(int argc, char **argv) {
          {"BinaryExpr", "std::unique_ptr<Expr> left, Token Operator, std::unique_ptr<Expr> right", ""},
          {"LiteralExpr", "TokenType type, std::string value", ""},
          {"UnaryExpr", "Token Operator, std::unique_ptr<Expr> right", ""},
-         {"Variable", "Token name", "std::any var, int level, const Type* evalty"},
-         {"Call", "std::unique_ptr<Expr> callee, std::vector<std::unique_ptr<Expr>> args", "Function* fn"}},
+         {"Variable", "Token name", "std::shared_ptr<Symbol> sym, const Type* evalty=0"},
+         {"Call", "std::unique_ptr<Expr> callee, std::vector<std::unique_ptr<Expr>> args", "const Function* fn=0"}},
         {},
-        {"\"Token.h\"", "\"Scope.h\"", "\"Type.h\"", "<any>", "<memory>", "<string>", "<vector>", "<variant>"}};
+        {"\"Token.h\"", "\"Scope.h\"", "\"Type.h\"", "<memory>", "<string>", "<vector>", "<variant>"}};
     AstGen exprGenerator(outDir, exprSpec);
     exprGenerator.generate();
 
@@ -202,14 +202,15 @@ int main(int argc, char **argv) {
         "Stmt",
         {{"Block", "std::vector<std::unique_ptr<Stmt>> stmts", ""},
          {"Expression", "std::unique_ptr<Expr> expr", ""},
-         {"FunctionParam", "Token type, Token name", "int level, const Type* evalty"},
-         {"Function", "Token name, std::vector<std::unique_ptr<Stmt>> params, std::unique_ptr<Stmt> body", "std::shared_ptr<Scope> scope, std::unique_ptr<FunctionType> evalty"},
+         {"FunctionParam", "Token type, Token name", "std::shared_ptr<Symbol> sym, const Type* evalty=0"},
+         {"Function", "bool fileScope, Token returnty, Scope::StorageClass storage, Token name, std::vector<std::unique_ptr<Stmt>> params, std::unique_ptr<Stmt> body",
+              "std::shared_ptr<Symbol> sym, std::unique_ptr<FunctionType> evalty"},
          {"If", "std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> thenBranch, std::unique_ptr<Stmt> elseBranch", ""},
          {"Return", "Token keyword, std::unique_ptr<Expr> value", ""},
          {"DoWhile", "std::unique_ptr<Stmt> body, std::unique_ptr<Expr> condition", "int loop_label"},
          {"While", "std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> body", "int loop_label"},
          {"For", "std::unique_ptr<Stmt> init, std::unique_ptr<Expr> condition, std::unique_ptr<Expr> post, std::unique_ptr<Stmt> body", "int loop_label"},
-         {"Decl", "std::unique_ptr<Expr> name, std::unique_ptr<Expr> init", ""},
+         {"Decl", "bool fileScope, bool loopDecl, Token type, Scope::StorageClass storage, std::unique_ptr<Expr> name, std::unique_ptr<Expr> init", ""},
          {"Null", "Token loc", ""},
          {"Break", "Token loc", "int loop_label"},
          {"Continue", "Token loc", "int loop_label"}},
@@ -220,8 +221,9 @@ int main(int argc, char **argv) {
 
     const AstSpecification tackySpec = {
         "Tacky",
-        {{"TackyProgram", "std::vector<std::shared_ptr<Tacky>> functions", ""},
-         {"TackyFunction", "Token name, std::vector<std::shared_ptr<Tacky>> params, std::vector<std::shared_ptr<Tacky>> instructions", ""},
+        {{"TackyProgram", "std::vector<std::shared_ptr<Tacky>> functions, std::vector<std::shared_ptr<Tacky>> defs", ""},
+         {"TackyFunction", "bool global, std::string name, std::vector<std::shared_ptr<Tacky>> params, std::vector<std::shared_ptr<Tacky>> instructions", ""},
+         {"TackyStaticVar", "bool global, std::string name, int init", ""},
          {"TackyUnary", "Token op, std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest", ""},
          {"TackyBinary", "Token op, std::shared_ptr<Tacky> src1, std::shared_ptr<Tacky> src2, std::shared_ptr<Tacky> dest", ""},
          {"TackyConstant", "int value", ""},
@@ -241,7 +243,8 @@ int main(int argc, char **argv) {
     const AstSpecification asmSpec = {
         "Asm",
         {{"AsmProgram", "std::vector<std::shared_ptr<Asm>> functions", ""},
-         {"AsmFunction", "Token name, std::vector<std::shared_ptr<Asm>> instructions", ""},
+         {"AsmFunction", "bool global, std::string name, std::vector<std::shared_ptr<Asm>> instructions", ""},
+         {"AsmStaticVar", "bool global, std::string name, int init", ""},
          {"AsmUnary", "Token op, std::shared_ptr<Asm> operand", ""},
          {"AsmBinary", "Token op, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2", ""},
          {"AsmCmp", "std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2", ""},
@@ -260,7 +263,8 @@ int main(int argc, char **argv) {
          {"AsmImm", "int value", ""},
          {"AsmRegister", "AsmReg reg, AsmWordSize size", ""},
          {"AsmPseudo", "std::string identifier", ""},
-         {"AsmStack", "int offset", ""}},
+         {"AsmStack", "int offset", ""},
+         {"AsmData", "std::string identifier", ""}},
         {{"CondCode", {"E", "NE", "G", "GE", "L", "LE"}},
          {"Reg", {"AX", "CX", "DX", "DI", "SI", "R8", "R9", "R10", "R11"}},
          {"WordSize", {"QUAD", "LONG", "BYTE"}}},

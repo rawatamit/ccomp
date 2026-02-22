@@ -21,11 +21,15 @@ public:
 class Parser {
 public:
   Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler);
-  size_t current;
-  std::unique_ptr<Stmt> declaration();
-  std::unique_ptr<Stmt> function(Token name);
+  std::vector<std::unique_ptr<Stmt>> parse();
+
+private:
+  std::unique_ptr<Stmt> declaration(bool fileScope);
+  std::unique_ptr<Stmt> function(bool fileScope, Token name,
+    const std::vector<Token>& qualifiers);
   std::unique_ptr<Stmt> blockStatement();
-  std::unique_ptr<Stmt> varDeclaration(Token name);
+  std::unique_ptr<Stmt> varDeclaration(bool fileScope, bool loopDecl,
+    Token name, const std::vector<Token>& qualifiers);
   std::unique_ptr<Stmt> statement();
   std::unique_ptr<Stmt> ifStatement();
   std::unique_ptr<Stmt> whileStatement();
@@ -46,18 +50,27 @@ public:
   std::unique_ptr<Expr> finishCall(std::unique_ptr<Expr> e);
   std::unique_ptr<Expr> unary();
   std::unique_ptr<Expr> primary();
-  std::vector<std::unique_ptr<Stmt>> parse();
   ParseError error(Token token, std::string message);
 
 private:
   bool match(const std::vector<TokenType> &types);
   Token previous();
   Token advance();
-  Token peek();
-  bool isAtEnd();
+  Token peek() const;
+  bool isAtEnd() const;
   bool check(TokenType type);
   Token consume(TokenType type, const std::string &message);
   void synchronize();
+  std::vector<Token> parseQualifiers();
+  bool isDeclarationFirstSet() const;
+  bool isTypeQualifier(const Token& tok) const;
+  Token getType(const std::vector<Token>& qualifiers) const;
+  Scope::StorageClass getStorageClass(
+    const std::vector<Token>& qualifiers) const;
+  Scope::StorageClass getStorageClass(
+    bool isFunction, const std::vector<Token>& qualifiers) const;
+
+  size_t current;
   std::vector<Token> tokens_;
   ErrorHandler &errorHandler_;
 };

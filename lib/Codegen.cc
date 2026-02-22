@@ -39,9 +39,14 @@ std::string Codegen::operator()(const AsmProgram& prog) {
 
 std::string Codegen::operator()(const AsmFunction& fn) {
   std::stringstream ss;
-  auto name = fn.name.toString();
-  ss << ".globl " << name << '\n'
-     << name << ":\n";
+  const std::string& name = fn.name;
+
+  if (fn.global) {
+    ss << "  .globl " << name << '\n';
+  }
+
+  ss << "  .text\n";
+  ss << name << ":\n";
   ss << "  pushq %rbp\n  movq %rsp, %rbp\n";
   for (auto inst : fn.instructions) {
     auto inst_code = code(inst);
@@ -52,6 +57,29 @@ std::string Codegen::operator()(const AsmFunction& fn) {
       ss << "  " << inst_code << '\n';
     }
   }
+
+  return ss.str();
+}
+
+std::string Codegen::operator()(const AsmStaticVar& svar) {
+  std::stringstream ss;
+  const std::string& name = svar.name;
+  if (svar.global) {
+    ss << "  .globl " << name << '\n';
+  }
+  
+  if (svar.init != 0) {
+    ss << "  .data\n";
+    ss << "  .align 4\n";
+    ss << name << ":\n";
+    ss << "  .long " << svar.init << '\n';
+  } else {
+    ss << "  .bss\n";
+    ss << "  .align 4\n";
+    ss << name << ":\n";
+    ss << "  .zero 4\n";
+  }
+
   return ss.str();
 }
 
@@ -246,4 +274,8 @@ std::string Codegen::operator()(const AsmPseudo&) {
 std::string Codegen::operator()(const AsmStack& st) {
   // -ve offset from rbp
   return std::format("{}(%rbp)", st.offset);
+}
+
+std::string Codegen::operator()(const AsmData& data) {
+  return std::format("{}(%rip)", data.identifier);
 }
