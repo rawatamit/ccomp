@@ -2,6 +2,7 @@
 #define UTIL_H
 
 #include "Token.h"
+#include "Type.h"
 #include "ast/Asm.h"
 #include <memory>
 #include <vector>
@@ -52,23 +53,39 @@ std::shared_ptr<Asm> make_asm(Args&&... args) {
 }
 
 template<typename T, typename... Args>
-void add_inst(std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args) {
-  auto inst = std::make_shared<Asm>(T(std::forward<Args>(args)...));
-  instructions.emplace_back(inst);
-}
-
-template<typename T, typename... Args>
-std::shared_ptr<Asm> make_add_and_return(
-  std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args) {
+std::shared_ptr<Asm> add_inst(std::vector<std::shared_ptr<Asm>>& instructions, Args&&... args) {
   auto inst = std::make_shared<Asm>(T(std::forward<Args>(args)...));
   instructions.emplace_back(inst);
   return inst;
+}
+
+inline bool isLargerThanInt32(std::shared_ptr<Asm> inst) {
+  if (auto val = std::get_if<AsmImm>(inst.get())) {
+    if (val->value > INT32_MAX) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 inline bool isMemoryValue(std::shared_ptr<Asm> inst) {
   return (std::holds_alternative<AsmData>(*inst) ||
           std::holds_alternative<AsmStack>(*inst));
 }
+
+inline const Type* getTypeFromToken(Token type) {
+  if (type.type == TokenType::INT) {
+    return BuiltInType::getInt32Ty();
+  } else if (type.type == TokenType::LONG) {
+    return BuiltInType::getInt64Ty();
+  }
+
+  return nullptr;
+}
+
+template<class... Ts>
+struct overloads : Ts... { using Ts::operator()...; };
 }
 
 #endif

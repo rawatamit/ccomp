@@ -19,6 +19,7 @@ private:
 
   ErrorHandler& errorHandler_;
   FunctionType currentFunction_;
+  const Type* currentFunctionReturnTy_;
   std::shared_ptr<Scope> globalScope_;
   std::shared_ptr<Scope> curScope_;
   std::vector<int> nested_loop_labels_;
@@ -54,7 +55,7 @@ public:
   void operator()(Function& stmt);
   void operator()(FunctionParam&);
   void operator()(const If& stmt);
-  void operator()(const Return& stmt);
+  void operator()(Return& stmt);
   void operator()(DoWhile& Stmt);
   void operator()(While& stmt);
   void operator()(For& Stmt);
@@ -66,7 +67,10 @@ public:
   void operator()(const Assign& expr);
   void operator()(const Conditional& expr);
   void operator()(const BinaryExpr& expr);
-  void operator()(const LiteralExpr& expr);
+  void operator()(const Int32Exp& expr);
+  void operator()(const Int64Exp& expr);
+  void operator()(const StringExp& expr);
+  void operator()(const CastExpr& expr);
   void operator()(const UnaryExpr& expr);
   void operator()(Variable& expr);
   void operator()(Call& expr);

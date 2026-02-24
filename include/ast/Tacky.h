@@ -8,21 +8,26 @@
 #include <variant>
 
 namespace ccomp {
+class Type;
 class TackyProgram;
 class TackyFunction;
 class TackyStaticVar;
 class TackyUnary;
 class TackyBinary;
-class TackyConstant;
+class TackyConstInt32;
+class TackyConstInt64;
 class TackyVar;
 class TackyReturn;
+class TackyTruncate;
+class TackySignExtend;
 class TackyCopy;
 class TackyJump;
 class TackyJumpIfZero;
 class TackyJumpIfNotZero;
 class TackyLabel;
 class TackyFunCall;
-using Tacky = std::variant<TackyProgram, TackyFunction, TackyStaticVar, TackyUnary, TackyBinary, TackyConstant, TackyVar, TackyReturn, TackyCopy, TackyJump, TackyJumpIfZero, TackyJumpIfNotZero, TackyLabel, TackyFunCall>;
+typedef const Type* type_ptr;
+using Tacky = std::variant<TackyProgram, TackyFunction, TackyStaticVar, TackyUnary, TackyBinary, TackyConstInt32, TackyConstInt64, TackyVar, TackyReturn, TackyTruncate, TackySignExtend, TackyCopy, TackyJump, TackyJumpIfZero, TackyJumpIfNotZero, TackyLabel, TackyFunCall>;
 class TackyProgram {
 public: 
   TackyProgram(std::vector<std::shared_ptr<Tacky>> functions, std::vector<std::shared_ptr<Tacky>> defs) :
@@ -45,12 +50,12 @@ public:
 
 class TackyStaticVar {
 public: 
-  TackyStaticVar(bool global, std::string name, int init) :
+  TackyStaticVar(bool global, std::string name, InitialValue init) :
     global(global), name(name), init(init) {}
 public: 
   bool global;
   std::string name;
-  int init;
+  InitialValue init;
 };
 
 class TackyUnary {
@@ -74,12 +79,20 @@ public:
   std::shared_ptr<Tacky> dest;
 };
 
-class TackyConstant {
+class TackyConstInt32 {
 public: 
-  TackyConstant(int value) :
+  TackyConstInt32(int value) :
     value(value) {}
 public: 
   int value;
+};
+
+class TackyConstInt64 {
+public: 
+  TackyConstInt64(long value) :
+    value(value) {}
+public: 
+  long value;
 };
 
 class TackyVar {
@@ -96,6 +109,24 @@ public:
     value(value) {}
 public: 
   std::shared_ptr<Tacky> value;
+};
+
+class TackyTruncate {
+public: 
+  TackyTruncate(std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest) :
+    src(src), dest(dest) {}
+public: 
+  std::shared_ptr<Tacky> src;
+  std::shared_ptr<Tacky> dest;
+};
+
+class TackySignExtend {
+public: 
+  TackySignExtend(std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest) :
+    src(src), dest(dest) {}
+public: 
+  std::shared_ptr<Tacky> src;
+  std::shared_ptr<Tacky> dest;
 };
 
 class TackyCopy {

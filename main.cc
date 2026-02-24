@@ -81,7 +81,7 @@ static int compile(const std::string &source, const char *outputpath,
   }
 
   ccomp::TypeResolver tycheck(errorHandler);
-  const ccomp::TypeResolver::TypeTable& symtab = tycheck.typecheck(stmts);
+  ccomp::SymTabT& symtab = tycheck.typecheck(stmts);
   if (errorHandler.foundError) {
     errorHandler.report();
     return 65;

@@ -5,11 +5,31 @@
 
 using namespace ccomp;
 
+static const Type* sGetCommonType(const Type* a, const Type* b) {
+  if (a == b) {
+    return a;
+  } else {
+    return BuiltInType::getInt64Ty();
+  }
+}
+
+static std::unique_ptr<Expr> sConvertTo(std::unique_ptr<Expr> expr, const Type* origTy, const Type* promoteTy) {
+  if (origTy == promoteTy) {
+    return expr;
+  } else {
+    // FIXME!!!
+    auto ret = std::make_unique<Expr>(CastExpr(Token(TokenType::ERROR, "lexeme", "lit", 0), std::move(expr)));
+    auto cexpr = std::get_if<CastExpr>(ret.get());
+    cexpr->evalty = promoteTy;
+    return ret;
+  }
+}
+
 TypeResolver::TypeResolver(ErrorHandler& errorHandler) :
   errorHandler_(errorHandler)
 {}
 
-const TypeResolver::TypeTable& TypeResolver::typecheck(const std::vector<std::unique_ptr<Stmt>>& prog) {
+SymTabT& TypeResolver::typecheck(const std::vector<std::unique_ptr<Stmt>>& prog) {
   for (auto& stmt : prog) {
     typecheck(stmt.get());
   }
@@ -50,7 +70,7 @@ const Type* TypeResolver::operator()(Function& fn) {
     paramTypes.emplace_back(typecheck(param.get()));
   }
 
-  auto fnstr = fn.sym->getName();
+  const std::string& fnstr = fn.sym->getName();
   if (!fn.fileScope && (fn.storage == Scope::STORAGE_STATIC)) {
     errorHandler_.add(0,
                       " function " + fnstr,
@@ -59,19 +79,15 @@ const Type* TypeResolver::operator()(Function& fn) {
 
   bool isGlobal = (fn.storage != Scope::STORAGE_STATIC);
   bool alreadyDefined = false;
-
-  // NOTE: all functions return an integer.
-  const FunctionType* fty =
-    new FunctionType(BuiltInType::getInt32Ty(), paramTypes);
-  fn.evalty = std::make_unique<FunctionType>(
-    FunctionType(BuiltInType::getInt32Ty(), paramTypes));
+  const Type* fnty =
+    new FunctionType(FunctionType(getTypeFromToken(fn.returnty), paramTypes));
 
   auto oldDecl = symtab_.find(fnstr);
   if (oldDecl != symtab_.end()) {
     // Function in symbol table.
     const Type* oldty = oldDecl->second->getType();
     if (auto oldfty = dynamic_cast<const FunctionType*>(oldty)) {
-      if (*oldfty != *fty) {
+      if (*oldfty != *static_cast<const FunctionType*>(fnty)) {
         errorHandler_.add(0,
                           " function " + fnstr,
                           "Redeclaration with different type.");
@@ -96,29 +112,33 @@ const Type* TypeResolver::operator()(Function& fn) {
     alreadyDefined = oldDecl->second->getAttrs()->isDefined();
   }
 
-  add(fnstr, fn.sym, fn.evalty.get(),
+  // set type definition to function symbol.
+  fn.sym->setType(fnty);
+
+  // update symbol table
+  add(fnstr, fn.sym, fnty,
       std::make_unique<SymbolAttrs>(alreadyDefined || fn.body, isGlobal));
 
   if (auto& body = fn.body) {
     typecheck(body.get());
   }
 
-  return fty;
+  return fnty;
 }
 
 const Type* TypeResolver::operator()(FunctionParam& param) {
-  assert(param.type.type == TokenType::INT);
-  param.evalty = BuiltInType::getInt32Ty();
-  return param.evalty;
+  const Type* ty = getTypeFromToken(param.type);
+  param.sym->setType(ty);
+  return ty;
 }
 
 const Type* TypeResolver::operator()(const If& ifstmt) {
   auto condty = typecheck(ifstmt.condition.get());
-  if ((condty != BuiltInType::getBoolTy()) &&
-      (condty != BuiltInType::getInt32Ty())) {
+  if ((condty != BuiltInType::getInt32Ty()) &&
+      (condty != BuiltInType::getInt64Ty())) {
     errorHandler_.add(0,
                       " condition in if",
-                      "Boolean type expected.");
+                      "Integer type expected.");
   }
 
   typecheck(ifstmt.thenBranch.get());
@@ -129,8 +149,11 @@ const Type* TypeResolver::operator()(const If& ifstmt) {
   return nullptr;
 }
 
-const Type* TypeResolver::operator()(const Return& stmt) {
-  return typecheck(stmt.value.get());
+const Type* TypeResolver::operator()(Return& stmt) {
+  const Type* ty = stmt.fnReturnTy;
+  const Type* valuety = typecheck(stmt.value.get());
+  stmt.value = sConvertTo(std::move(stmt.value), valuety, ty);
+  return ty;
 }
 
 const Type* TypeResolver::operator()(const DoWhile& loop) {
@@ -168,16 +191,17 @@ const Type* TypeResolver::operator()(const For& loop) {
   return nullptr;
 }
 
-const Type* TypeResolver::typecheckFileScopeDecl(const Decl& decl) {
+const Type* TypeResolver::typecheckFileScopeDecl(Decl& decl) {
   const Variable* var = std::get_if<Variable>(decl.name.get());
-  std::string declstr = var->sym->getName();
-  const Type* ty = BuiltInType::getInt32Ty();
+  const std::string& declstr = var->sym->getName();
+  const Type* ty = getTypeFromToken(decl.type);
   InitialValue initValue;
 
   if (auto& init = decl.init) {
-    if (auto constval = std::get_if<LiteralExpr>(init.get())) {
-      initValue = InitialValue(InitialValue::INITIAL_VALUE,
-                                std::stoi(constval->value));
+    if (auto constval = std::get_if<Int32Exp>(init.get())) {
+      initValue = InitialValue(InitialValue::INITIAL_INT32_VALUE, constval->int32);
+    } else if (auto constval = std::get_if<Int64Exp>(init.get())) {
+      initValue = InitialValue(InitialValue::INITIAL_LONG_VALUE, constval->int64);
     } else {
       errorHandler_.add(0,
                         " at declaration",
@@ -197,10 +221,15 @@ const Type* TypeResolver::typecheckFileScopeDecl(const Decl& decl) {
   if (oldDecl != symtab_.end()) {
     const Type* oldty = oldDecl->second->getType();
     // old type is not Int
-    if (oldty != BuiltInType::getInt32Ty()) {
+    //if (oldty != BuiltInType::getInt32Ty()) {
+    if (dynamic_cast<const FunctionType*>(oldty)) {
       errorHandler_.add(0,
                         " declaration " + declstr,
                         "Function redeclared as variable.");
+    } else if (oldty != ty) {
+      errorHandler_.add(0,
+                        " declaration " + declstr,
+                        "Variable redeclared with different type.");
     }
 
     // if a previous declaration was static, and this declaration is extern,
@@ -215,16 +244,19 @@ const Type* TypeResolver::typecheckFileScopeDecl(const Decl& decl) {
     }
 
     InitialValue oldInitValue = oldDecl->second->getAttrs()->getInitValue();
-    if (oldInitValue.getType() == InitialValue::INITIAL_VALUE) {
-      if (initValue.getType() == InitialValue::INITIAL_VALUE) {
+    if (oldInitValue.getType() == InitialValue::INITIAL_INT32_VALUE ||
+        oldInitValue.getType() == InitialValue::INITIAL_LONG_VALUE) {
+      if (initValue.getType() == InitialValue::INITIAL_INT32_VALUE ||
+          initValue.getType() == InitialValue::INITIAL_LONG_VALUE) {
         errorHandler_.add(0,
                           " declaration " + declstr,
                           "Conflicting file scope variable definitions.");
       } else {
         initValue = oldInitValue;
       }
-    } else if ((initValue.getType() != InitialValue::INITIAL_VALUE) &&
-                (oldInitValue.getType() == InitialValue::TENTATIVE_VALUE)) {
+    } else if (((initValue.getType() != InitialValue::INITIAL_INT32_VALUE) &&
+                (initValue.getType() != InitialValue::INITIAL_LONG_VALUE)) &&
+               (oldInitValue.getType() == InitialValue::TENTATIVE_VALUE)) {
       initValue = InitialValue(InitialValue::TENTATIVE_VALUE);
     }
   }
@@ -234,10 +266,10 @@ const Type* TypeResolver::typecheckFileScopeDecl(const Decl& decl) {
   return ty;
 }
 
-const Type* TypeResolver::typecheckLocalDecl(const Decl& decl) {
+const Type* TypeResolver::typecheckLocalDecl(Decl& decl) {
   const Variable* var = std::get_if<Variable>(decl.name.get());
-  std::string declstr = var->sym->getName();
-  const Type* ty = BuiltInType::getInt32Ty();
+  const std::string& declstr = var->sym->getName();
+  const Type* ty = getTypeFromToken(decl.type);
 
   if (decl.storage == Scope::STORAGE_EXTERN) {
     if (decl.init) {
@@ -250,10 +282,15 @@ const Type* TypeResolver::typecheckLocalDecl(const Decl& decl) {
     if (oldDecl != symtab_.end()) {
       const Type* oldty = oldDecl->second->getType();
       // old type is a function type
-      if (oldty != BuiltInType::getInt32Ty()) {
+      //if (oldty != BuiltInType::getInt32Ty()) {
+      if (dynamic_cast<const FunctionType*>(oldty)) {
         errorHandler_.add(0,
                           " declaration " + declstr,
                           "Function redeclared as variable.");
+      } else if (oldty != ty) {
+        errorHandler_.add(0,
+                          " declaration " + declstr,
+                          "Variable redeclared with different type.");
       }
     } else {
       add(declstr, var->sym, ty,
@@ -270,9 +307,10 @@ const Type* TypeResolver::typecheckLocalDecl(const Decl& decl) {
     InitialValue initValue;
     if (decl.init == nullptr) {
       initValue = InitialValue(0);
-    } else if (auto constval = std::get_if<LiteralExpr>(decl.init.get())) {
-      initValue = InitialValue(InitialValue::INITIAL_VALUE,
-                                std::stoi(constval->value));
+    } else if (auto constval = std::get_if<Int32Exp>(decl.init.get())) {
+      initValue = InitialValue(InitialValue::INITIAL_INT32_VALUE, constval->int32);
+    } else if (auto constval = std::get_if<Int64Exp>(decl.init.get())) {
+      initValue = InitialValue(InitialValue::INITIAL_LONG_VALUE, constval->int64);
     } else {
       errorHandler_.add(0,
                         " at declaration",
@@ -286,14 +324,15 @@ const Type* TypeResolver::typecheckLocalDecl(const Decl& decl) {
         std::make_unique<SymbolAttrs>());
 
     if (auto& init = decl.init) {
-      typecheck(init.get());
+      const Type* initty = typecheck(init.get());
+      decl.init = sConvertTo(std::move(init), initty, ty);
     }
   }
 
   return ty;
 }
 
-const Type* TypeResolver::operator()(const Decl& decl) {
+const Type* TypeResolver::operator()(Decl& decl) {
   return (decl.fileScope) ?
          typecheckFileScopeDecl(decl) :
          typecheckLocalDecl(decl);
@@ -311,62 +350,92 @@ const Type* TypeResolver::operator()(const Continue&) {
   return nullptr;
 }
 
-const Type* TypeResolver::operator()(const Assign& assign) {
+const Type* TypeResolver::operator()(Assign& assign) {
   auto lty = typecheck(assign.lvalue.get());
   auto vty = typecheck(assign.value.get());
-
-  if (lty != vty) {
-    errorHandler_.add(0,
-                      " at assignment",
-                      "Type mismatch between lvalue and rvalue.");
+  if (dynamic_cast<const FunctionType*>(lty) ||
+      dynamic_cast<const FunctionType*>(vty)) {
+    errorHandler_.add(0, " assignment",
+                      "Function type in assignment.");
   }
 
-  return lty;
+  const Type* promoteTy = sGetCommonType(lty, vty);
+  assign.value = sConvertTo(std::move(assign.value), vty, promoteTy);
+  return assign.evalty = lty;
 }
 
-const Type* TypeResolver::operator()(const Conditional& cexpr) {
-  auto condty = typecheck(cexpr.condition.get());
-  if ((condty != BuiltInType::getBoolTy()) &&
-      (condty != BuiltInType::getInt32Ty())) {
-    errorHandler_.add(0,
-                      " at condition in ternary",
-                      "Boolean type expected.");
-  }
-
+const Type* TypeResolver::operator()(Conditional& cexpr) {
+  typecheck(cexpr.condition.get());
   auto thenty = typecheck(cexpr.thenExp.get());
   auto elsety = typecheck(cexpr.elseExp.get());
-  if (thenty != elsety) {
-    errorHandler_.add(0,
-                      " at expression in ternary",
-                      "Expression types in ternary must match.");
+  const Type* commonty = sGetCommonType(thenty, elsety);
+  cexpr.thenExp = sConvertTo(std::move(cexpr.thenExp), thenty, commonty);
+  cexpr.elseExp = sConvertTo(std::move(cexpr.elseExp), elsety, commonty);
+  return cexpr.evalty = commonty;
+}
+
+const Type* TypeResolver::operator()(BinaryExpr& binexpr) {
+  auto leftty = typecheck(binexpr.left.get());
+  auto rightty = typecheck(binexpr.right.get());
+
+  if (dynamic_cast<const FunctionType*>(leftty) ||
+      dynamic_cast<const FunctionType*>(rightty)) {
+    errorHandler_.add(0, " binary expression",
+                      "Function type operand in expression.");
   }
 
-  return thenty;
-}
-
-const Type* TypeResolver::operator()(const BinaryExpr& expr) {
-  auto tyleft = typecheck(expr.left.get());
-  auto tyright = typecheck(expr.right.get());
-  if (tyleft != tyright) {
-    errorHandler_.add(expr.Operator.line,
-                      " at expression " + expr.Operator.toString(),
-                      "Type mismatch.");
+  // || and && resolve to integer type
+  TokenType optype = binexpr.op.type;
+  if ((optype == TokenType::AMPERSAND_AMPERSAND) ||
+      (optype == TokenType::PIPE_PIPE)) {
+    return binexpr.evalty = BuiltInType::getInt32Ty();
   }
 
-  return BuiltInType::getInt32Ty();
+  const Type* commonty = sGetCommonType(leftty, rightty);
+  binexpr.left = sConvertTo(std::move(binexpr.left), leftty, commonty);
+  binexpr.right = sConvertTo(std::move(binexpr.right), rightty, commonty);
+
+  if ((optype == TokenType::PLUS) || (optype == TokenType::MINUS) ||
+      (optype == TokenType::STAR) || (optype == TokenType::SLASH) ||
+      (optype == TokenType::PERCENT)) {
+    return binexpr.evalty = commonty;
+  } else {
+    return binexpr.evalty = BuiltInType::getInt32Ty();
+  }
 }
 
-const Type* TypeResolver::operator()(const LiteralExpr& expr) {
-  assert(expr.type == TokenType::NUMBER);
-  return BuiltInType::getInt32Ty();
+const Type* TypeResolver::operator()(Int32Exp& int32) {
+  return int32.evalty = BuiltInType::getInt32Ty();
 }
 
-const Type* TypeResolver::operator()(const UnaryExpr& expr) {
-  return typecheck(expr.right.get());
+const Type* TypeResolver::operator()(Int64Exp& int64) {
+  return int64.evalty = BuiltInType::getInt64Ty();
 }
 
-const Type* TypeResolver::operator()(const Variable& var) {
-  auto varstr = var.sym->getName();
+const Type* TypeResolver::operator()(const StringExp&) {
+  assert(0);
+}
+ 
+const Type* TypeResolver::operator()(CastExpr& cast) {
+  cast.exprty = typecheck(cast.expr.get());
+  cast.evalty = getTypeFromToken(cast.type);
+  return cast.evalty;
+}
+
+const Type* TypeResolver::operator()(UnaryExpr& expr) {
+  const Type* exprty = typecheck(expr.right.get());
+  if (expr.op.type == TokenType::BANG) {
+    // !expr evaluates to integer.
+    expr.evalty = BuiltInType::getInt32Ty();
+  } else {
+    expr.evalty = exprty;
+  }
+
+  return expr.evalty;
+}
+
+const Type* TypeResolver::operator()(Variable& var) {
+  const std::string& varstr = var.sym->getName();
   auto resolvedRef = symtab_.find(varstr);
   const Type* ty = (resolvedRef != symtab_.end()) ? resolvedRef->second->getType() : nullptr;
 
@@ -374,22 +443,34 @@ const Type* TypeResolver::operator()(const Variable& var) {
     return ty;
   } else if (auto fn = var.sym->getFunction()) {
     // Note: calling gettype again on function, will trigger type recomputation.
-    ty = fn->evalty.get();
+    ty = fn->sym->getType();
   } else if (auto param = var.sym->getFunctionParam()) {
-    ty = param->evalty;
+    ty = param->sym->getType();
   } else {
     ty = BuiltInType::getInt32Ty();
   }
 
-  return ty;
+  return var.evalty = ty;
 }
 
-const Type* TypeResolver::operator()(const Call& call) {
+const Type* TypeResolver::operator()(Call& call) {
   const Function* fn = call.fn;
   if (fn->params.size() != call.args.size()) {
     errorHandler_.add(fn->name.line, " at '" + fn->name.toString() + "'",
                       "Call and function args don't match.");
   }
 
-  return fn->evalty->getReturnTy();
+  const FunctionType* fnty =
+    static_cast<const FunctionType*>(fn->sym->getType());
+  const std::vector<const Type*>& paramsty = fnty->getParamTy();
+  for (size_t i = 0; i < call.args.size(); ++i) {
+    const Type* declty = paramsty[i];
+    const Type* evalty = typecheck(call.args[i].get());
+    const Type* promotety = sGetCommonType(declty, evalty);
+    call.args[i] = sConvertTo(std::move(call.args[i]), evalty, promotety);
+  }
+
+  // result of call expression is the same as return type of function.
+  call.evalty = fnty->getReturnTy();
+  return call.evalty;
 }

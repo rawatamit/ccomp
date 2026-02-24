@@ -1,6 +1,7 @@
 #include "Resolver.h"
 #include "Scope.h"
 #include "Symbol.h"
+#include "Util.h"
 #include "ast/Stmt.h"
 #include <format>
 #include <cassert>
@@ -34,7 +35,9 @@ void Resolver::resolve(Expr* expr) {
 void Resolver::resolveFunction(Function& fn,
                                FunctionType type) {
   FunctionType enclosingFn = currentFunction_;
+  const Type* enclosingRetTy = currentFunctionReturnTy_;
   currentFunction_ = type;
+  currentFunctionReturnTy_ = getTypeFromToken(fn.returnty);
   beginScope();
   for (auto& param : fn.params) {
     resolve(param.get());
@@ -46,6 +49,7 @@ void Resolver::resolveFunction(Function& fn,
 
   endScope();
   currentFunction_ = enclosingFn;
+  currentFunctionReturnTy_ = enclosingRetTy;
 }
 
 void Resolver::beginScope() {
@@ -59,7 +63,7 @@ void Resolver::endScope() {
 void Resolver::declare(const Token& name, Function* fn) {
   auto sym = curScope_->resolve(name);
   int level = sym ? sym->getNestingLevel() : -1;
-  bool isSameScope = (curScope_->getLevel() == level);
+  bool isSameScope = (curScope_->getNestingLevel() == level);
   if (isSameScope && !sym->hasExternalLinkage()) {
       errorHandler_.add(
           name.line, " at '" + name.lexeme + "'",
@@ -99,7 +103,7 @@ std::string Resolver::getUniqueName(const Decl& decl, bool hasExternalLinkage) {
   if (hasExternalLinkage) {
     return var->name.toString();
   } else {
-    return std::format("{}_{}_{}", var->name.toString(), curScope_->getLevel(),
+    return std::format("{}_{}_{}", var->name.toString(), curScope_->getNestingLevel(),
                        uniqueId_++);
   }
 }
@@ -109,7 +113,7 @@ std::string Resolver::getUniqueName(const Function& fn) {
 }
 
 std::string Resolver::getUniqueName(const FunctionParam& param) {
-  return std::format("{}_{}_{}", param.name.toString(), curScope_->getLevel(),
+  return std::format("{}_{}_{}", param.name.toString(), curScope_->getNestingLevel(),
                      uniqueId_++);
 }
 
@@ -136,7 +140,7 @@ void Resolver::operator()(FunctionParam& param) {
   auto name = param.name;
   auto sym = curScope_->resolve(name);
   if (sym && (sym->isVariable() || sym->isFunctionParam()) &&
-      (curScope_->getLevel() == sym->getNestingLevel())) {
+      (curScope_->getNestingLevel() == sym->getNestingLevel())) {
     errorHandler_.add(
         name.line, " at '" + name.lexeme + "'",
         "Variable with this name already declared in this scope.");
@@ -165,12 +169,13 @@ void Resolver::operator()(const Expression& stmt) {
   resolve(stmt.expr.get());
 }
 
-void Resolver::operator()(const Return& ret) {
+void Resolver::operator()(Return& ret) {
   if (currentFunction_ == NONEF) {
     errorHandler_.add(ret.keyword.line, " at 'return'",
                      "Cannot return from top-level code.");
   }
 
+  ret.fnReturnTy = currentFunctionReturnTy_;
   if (ret.value) {
     resolve(ret.value.get());
   }
@@ -223,7 +228,7 @@ void Resolver::operator()(const Decl& decl) {
     auto oldsym = curScope_->resolve(name);
 
     int level = oldsym ? oldsym->getNestingLevel() : -1;
-    bool isSameScope = (curScope_->getLevel() == level);
+    bool isSameScope = (curScope_->getNestingLevel() == level);
     bool isFunctionParam = (oldsym && oldsym->isFunctionParam());
     bool declHasExternalLinkage = (decl.storage == Scope::STORAGE_EXTERN);
 
@@ -293,7 +298,7 @@ void Resolver::operator()(Continue& flow) {
 void Resolver::operator()(const Assign& assign) {
   auto& lvalue = assign.lvalue;
   resolve(lvalue.get());
-  if (std::holds_alternative<Variable>(*lvalue)) {
+  if (std::get_if<Variable>(lvalue.get())) {
     resolve(assign.value.get());
   } else {
     // TODO: fix line number.
@@ -313,7 +318,17 @@ void Resolver::operator()(const BinaryExpr& binexpr) {
   resolve(binexpr.right.get());
 }
 
-void Resolver::operator()(const LiteralExpr&) {
+void Resolver::operator()(const Int32Exp&) {
+}
+
+void Resolver::operator()(const Int64Exp&) {
+}
+
+void Resolver::operator()(const StringExp&) {
+}
+
+void Resolver::operator()(const CastExpr& cast) {
+  resolve(cast.expr.get());
 }
 
 void Resolver::operator()(const UnaryExpr& unary) {

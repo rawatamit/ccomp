@@ -11,7 +11,7 @@ using namespace ccomp;
 
 const std::vector<AsmReg> AsmGen::arg_regs_ = {DI, SI, DX, CX, R8, R9};
 
-AsmGen::AsmGen(Tacky* tackycode, const TypeResolver::TypeTable& symtab,
+AsmGen::AsmGen(Tacky* tackycode, const SymTabT& symtab,
    ErrorHandler& errorHandler) :
   tackycode_(tackycode), symtab_(symtab), errorHandler_(errorHandler)
 {}
@@ -19,7 +19,20 @@ AsmGen::AsmGen(Tacky* tackycode, const TypeResolver::TypeTable& symtab,
 std::shared_ptr<Asm> AsmGen::gen() {
   std::shared_ptr<Asm> prog = std::visit(*this, *tackycode_);
   instructions_.clear();
-  assert(std::holds_alternative<AsmProgram>(*prog));
+
+  // fill backend symbol table
+  for (const auto& it : symtab_) {
+    auto sym  = it.second;
+    const SymbolAttrs* attrs = sym->getAttrs();
+    if (sym->isFunction()) {
+      asm_symtab_.addFunction(sym->getName(), attrs->isDefined());
+    } else {
+      const Type* ty = sym->getType();
+      bool isStatic = (attrs->getAttributeType() == SymbolAttrs::STATIC_ATTR);
+      asm_symtab_.addObject(sym->getName(), type_to_asm_type(ty), isStatic);
+    }
+  }
+
   return replace_pseudo_regs(prog.get());
 }
 
@@ -35,10 +48,48 @@ std::vector<std::shared_ptr<Asm>> AsmGen::gen(
   return {};
 }
 
+AsmInstType AsmGen::get_type(std::shared_ptr<Tacky> inst) const {
+  const auto visitor = overloads{
+      [](const TackyProgram&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyFunction&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyStaticVar&) { return AsmInstType::ASM_TYPE_ERR; },
+      [this](const TackyUnary& expr) { return get_type(expr.src); },
+      [this](const TackyBinary& expr) { return get_type(expr.src1); },
+      [](const TackyConstInt32&) { return AsmInstType::LONG; },
+      [](const TackyConstInt64&) { return AsmInstType::QUAD; },
+      [this](const TackyVar& var) {
+        auto it = symtab_.find(var.identifier);
+        const Type* ty = it->second->getType();
+        return type_to_asm_type(ty);
+      },
+      [](const TackyReturn&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyTruncate&) { return AsmInstType::LONG; },
+      [](const TackySignExtend&) { return AsmInstType::QUAD; },
+      [this](const TackyCopy& copy) { return get_type(copy.src); },
+      [](const TackyJump&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyJumpIfZero&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyJumpIfNotZero&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyLabel&) { return AsmInstType::ASM_TYPE_ERR; },
+      [this](const TackyFunCall& call) { return get_type(call.dest); },
+  };
+
+  return std::visit(visitor, *inst);
+}
+
+AsmInstType AsmGen::type_to_asm_type(const Type* ty) const {
+  if (ty == BuiltInType::getInt32Ty()) {
+    return AsmInstType::LONG;
+  } else if (ty == BuiltInType::getInt64Ty()) {
+    return AsmInstType::QUAD;
+  } else {
+    return AsmInstType::ASM_TYPE_ERR;
+  }
+}
+
 std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
   class ReplacePseudo {
   public:
-    ReplacePseudo(const TypeResolver::TypeTable& symtab) :
+    ReplacePseudo(const AsmSymTabT& symtab) :
       symtab_(symtab) {}
 
     std::shared_ptr<Asm> fix(Asm* prog) {
@@ -46,7 +97,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
     }
 
   private:
-    const TypeResolver::TypeTable& symtab_;
+    const AsmSymTabT& symtab_;
     int fn_stack_size_ = 0;
     std::vector<std::shared_ptr<Asm>> instructions_;
     std::unordered_map<std::string, int> reg_to_offset_;
@@ -73,70 +124,121 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
 
       // stack allocation at the beginning; round up to multiple of 16
       int stack_size = roundUp(fn_stack_size_, 16);
-      auto alloc_stack = make_asm<AsmAllocateStack>(stack_size);
+      auto alloc_stack = make_asm<AsmBinary>(
+          AsmInstType::QUAD, AsmInst::SUB,
+          make_asm<AsmImm>(stack_size),
+          make_asm<AsmRegister>(AsmInstType::QUAD, SP));
       instructions_.insert(instructions_.begin(), alloc_stack);
       return make_asm<AsmFunction>(fn.global, fn.name, std::move(instructions_));
     }
 
     std::shared_ptr<Asm> operator()(const AsmStaticVar& svar) {
-      return make_add_and_return<AsmStaticVar>(instructions_, svar.global,
-                                               svar.name, svar.init);
+      return add_inst<AsmStaticVar>(instructions_, svar.global,
+                                               svar.name, svar.alignment, svar.init);
     }
 
     std::shared_ptr<Asm> operator()(const AsmUnary& unary) {
       // shouldn't be anything other than a single instruction
       auto operand = fix_pseudo(unary.operand.get());
-      return make_add_and_return<AsmUnary>(instructions_, unary.op, operand);
+      return add_inst<AsmUnary>(instructions_, unary.type, unary.op, operand);
     }
 
     std::shared_ptr<Asm> operator()(const AsmBinary& bin) {
-      // shouldn't be anything other than a single instruction
       auto operand1 = fix_pseudo(bin.operand1.get());
       auto operand2 = fix_pseudo(bin.operand2.get());
+      bool rewrite_inst = false;
 
-      switch (bin.op.type) {
-        case TokenType::PLUS:
-        case TokenType::MINUS:
-          if (isMemoryValue(operand1) && isMemoryValue(operand2)) {
+      // Instruction rewrite for binary expressions is split into two steps.
+      // Multiplication as an example requires that the first operand is smaller
+      // than INT_MAX. It also requires that the second operand is not held in
+      // memory. It is easier to rewrite it twice than to call fix_pseudo in a
+      // loop.
+      switch (bin.op) {
+        case AsmInst::ADD:
+        case AsmInst::SUB:
+          // Rewrite addition and subtraction if first operand is larger than
+          // INT_MAX or both operands are stored in memory.
+          rewrite_inst = (((bin.type == AsmInstType::QUAD) &&
+                           isLargerThanInt32(operand1)) ||
+                          (isMemoryValue(operand1) && isMemoryValue(operand2)));
+          if (rewrite_inst) {
             // movl -4(%rbp), %r10d
             // addl %r10d, -8(%rbp)
-            auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
-            add_inst<AsmMov>(instructions_, operand1, reg);
-            return make_add_and_return<AsmBinary>(instructions_, bin.op, reg, operand2);
+            auto reg = make_asm<AsmRegister>(bin.type, AsmReg::R10);
+            add_inst<AsmMov>(instructions_, bin.type, operand1, reg);
+            return add_inst<AsmBinary>(instructions_, bin.type, bin.op, reg,
+                                      operand2);
           }
           break;
 
-        case TokenType::STAR:
-          if (isMemoryValue(operand2)) {
-            // movl -4(%rbp), %r11d
-            // imull $3, %r11d
-            // movl %r11d, -4(%rbp)
-            auto reg = make_asm<AsmRegister>(AsmReg::R11, AsmWordSize::LONG);
-            add_inst<AsmMov>(instructions_, operand2, reg);
-            add_inst<AsmBinary>(instructions_, bin.op, operand1, reg);
-            return make_add_and_return<AsmMov>(instructions_, reg, operand2);
+        case AsmInst::MUL:
+          // Rewrite multiplication if first operand is larger than INT_MAX
+          rewrite_inst = ((bin.type == AsmInstType::QUAD) &&
+                           isLargerThanInt32(operand1));
+          if (rewrite_inst) {
+            // movl -4(%rbp), %r10d
+            // addl %r10d, -8(%rbp)
+            auto reg = make_asm<AsmRegister>(bin.type, AsmReg::R10);
+            add_inst<AsmMov>(instructions_, bin.type, operand1, reg);
+
+            if (!isMemoryValue(operand2)) {
+              return add_inst<AsmBinary>(instructions_, bin.type, bin.op, reg,
+                                        operand2);
+            } else {
+              // Read first operand from register.
+              operand1 = reg;
+            }
           }
+          break;
+
         default:
           break;
       }
 
-      return make_add_and_return<AsmBinary>(instructions_, bin.op, operand1, operand2);
+      switch (bin.op) {
+        case AsmInst::MUL:
+          if (isMemoryValue(operand2)) {
+            // movl -4(%rbp), %r11d
+            // imull $3, %r11d
+            // movl %r11d, -4(%rbp)
+            auto reg = make_asm<AsmRegister>(bin.type, AsmReg::R11);
+            add_inst<AsmMov>(instructions_, bin.type, operand2, reg);
+            add_inst<AsmBinary>(instructions_, bin.type, bin.op, operand1, reg);
+            return add_inst<AsmMov>(instructions_, bin.type, reg, operand2);
+          }
+          break;
+
+        default:
+          break;
+      }
+
+      return add_inst<AsmBinary>(instructions_, bin.type, bin.op, operand1,
+                                 operand2);
     }
 
     std::shared_ptr<Asm> operator()(const AsmCmp& cmp) {
       auto operand1 = fix_pseudo(cmp.operand1.get());
       auto operand2 = fix_pseudo(cmp.operand2.get());
 
-      if (isMemoryValue(operand1) && isMemoryValue(operand2)) {
-        auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
-        add_inst<AsmMov>(instructions_, operand1, reg);
-        return make_add_and_return<AsmCmp>(instructions_, reg, operand2);
-      } else if (std::holds_alternative<AsmImm>(*operand2)) {
-        auto reg = make_asm<AsmRegister>(AsmReg::R11, AsmWordSize::LONG);
-        add_inst<AsmMov>(instructions_, operand2, reg);
-        return make_add_and_return<AsmCmp>(instructions_, operand1, reg);
+      // Rewrite cmp in two steps.
+      if (isLargerThanInt32(operand1) ||
+          (isMemoryValue(operand1) && isMemoryValue(operand2))) {
+        auto reg = make_asm<AsmRegister>(cmp.type, AsmReg::R10);
+        add_inst<AsmMov>(instructions_, cmp.type, operand1, reg);
+        if (!std::holds_alternative<AsmImm>(*operand2)) {
+          return add_inst<AsmCmp>(instructions_, cmp.type, reg, operand2);
+        } else {
+          operand1 = reg;
+        }
+      }
+
+      // Rewrite as needed.
+      if (std::holds_alternative<AsmImm>(*operand2)) {
+        auto reg = make_asm<AsmRegister>(cmp.type, AsmReg::R11);
+        add_inst<AsmMov>(instructions_, cmp.type, operand2, reg);
+        return add_inst<AsmCmp>(instructions_, cmp.type, operand1, reg);
       } else {
-        return make_add_and_return<AsmCmp>(instructions_, operand1, operand2);
+        return add_inst<AsmCmp>(instructions_, cmp.type, operand1, operand2);
       }
     }
 
@@ -147,67 +249,97 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       if (std::holds_alternative<AsmImm>(*operand)) {
         // movl $3, %r10d
         // idivl %r10d
-        auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
-        add_inst<AsmMov>(instructions_, operand, reg);
-        return make_add_and_return<AsmIdiv>(instructions_, reg);
+        auto reg = make_asm<AsmRegister>(idiv.type, AsmReg::R10);
+        add_inst<AsmMov>(instructions_, idiv.type, operand, reg);
+        return add_inst<AsmIdiv>(instructions_, idiv.type, reg);
       } else {
-        return make_add_and_return<AsmIdiv>(instructions_, operand);
+        return add_inst<AsmIdiv>(instructions_, idiv.type, operand);
       }
     }
 
     std::shared_ptr<Asm> operator()(const AsmCdq& cdq) {
-      return make_add_and_return<AsmCdq>(instructions_, cdq.dummy);
+      return add_inst<AsmCdq>(instructions_, cdq.type, cdq.dummy);
     }
 
     std::shared_ptr<Asm> operator()(const AsmJmp& jmp) {
-      return make_add_and_return<AsmJmp>(instructions_, jmp.target);
+      return add_inst<AsmJmp>(instructions_, jmp.target);
     }
 
     std::shared_ptr<Asm> operator()(const AsmJmpCC& jmp) {
-      return make_add_and_return<AsmJmpCC>(instructions_, jmp.cond_code, jmp.target);
+      return add_inst<AsmJmpCC>(instructions_, jmp.cond_code, jmp.target);
     }
 
     std::shared_ptr<Asm> operator()(const AsmSetCC& setcc) {
       auto operand = fix_pseudo(setcc.operand.get());
-      return make_add_and_return<AsmSetCC>(instructions_, setcc.cond_code, operand);
+      return add_inst<AsmSetCC>(instructions_, setcc.cond_code, operand);
     }
 
     std::shared_ptr<Asm> operator()(const AsmLabel& label) {
-      return make_add_and_return<AsmLabel>(instructions_, label.identifier);
+      return add_inst<AsmLabel>(instructions_, label.identifier);
     }
 
     std::shared_ptr<Asm> operator()(const AsmMov& mov) {
       auto src = fix_pseudo(mov.src.get());
       auto dest = fix_pseudo(mov.dest.get());
 
-      if (isMemoryValue(src) && isMemoryValue(dest)) {
-        auto reg = make_asm<AsmRegister>(AsmReg::R10, AsmWordSize::LONG);
-        add_inst<AsmMov>(instructions_, src, reg);
-        return make_add_and_return<AsmMov>(instructions_, reg, dest);
+      if ((mov.type == AsmInstType::LONG) && isLargerThanInt32(src)) {
+        // Long value is greater than INT32_MAX, truncate first 4 bytes.
+        auto val = std::get_if<AsmImm>(src.get());
+        int trunc = val->value & 0xFFFFFFFF;
+        return add_inst<AsmMov>(instructions_, mov.type,
+                                make_asm<AsmImm>(trunc), dest);
+      } else if (((mov.type == AsmInstType::QUAD) && isLargerThanInt32(src)) ||
+                 (isMemoryValue(src) && isMemoryValue(dest))) {
+        auto reg = make_asm<AsmRegister>(mov.type, AsmReg::R10);
+        add_inst<AsmMov>(instructions_, mov.type, src, reg);
+        return add_inst<AsmMov>(instructions_, mov.type, reg, dest);
       } else {
-        return make_add_and_return<AsmMov>(instructions_, src, dest);
+        return add_inst<AsmMov>(instructions_, mov.type, src, dest);
       }
     }
 
-    std::shared_ptr<Asm> operator()(const AsmAllocateStack& alloc) {
-      return make_add_and_return<AsmAllocateStack>(instructions_, alloc.size);
-    }
+    std::shared_ptr<Asm> operator()(const AsmMovsx& mov) {
+      auto src = fix_pseudo(mov.src.get());
+      auto dest = fix_pseudo(mov.dest.get());
 
-    std::shared_ptr<Asm> operator()(const AsmDeallocateStack& dealloc) {
-      return make_add_and_return<AsmDeallocateStack>(instructions_, dealloc.size);
+      bool isSrcImm = std::get_if<AsmImm>(src.get());
+      bool isDstMemory = isMemoryValue(dest);
+      if (isSrcImm && isDstMemory) {
+        auto reg10 = make_asm<AsmRegister>(AsmInstType::LONG, AsmReg::R10);
+        auto reg11 = make_asm<AsmRegister>(AsmInstType::QUAD, AsmReg::R11);
+        add_inst<AsmMov>(instructions_, AsmInstType::LONG, src, reg10);
+        add_inst<AsmMovsx>(instructions_, reg10, reg11);
+        return add_inst<AsmMov>(instructions_, AsmInstType::QUAD, reg11, dest);
+      } else if (isSrcImm) {
+        auto reg10 = make_asm<AsmRegister>(AsmInstType::LONG, AsmReg::R10);
+        add_inst<AsmMov>(instructions_, AsmInstType::LONG, src, reg10);
+        return add_inst<AsmMovsx>(instructions_, reg10, dest);
+      } else if (isDstMemory) {
+        auto reg11 = make_asm<AsmRegister>(AsmInstType::QUAD, AsmReg::R11);
+        add_inst<AsmMovsx>(instructions_, src, reg11);
+        return add_inst<AsmMov>(instructions_, AsmInstType::QUAD, reg11, dest);
+      }
+
+      return add_inst<AsmMovsx>(instructions_, src, dest);
     }
 
     std::shared_ptr<Asm> operator()(const AsmPush& push) {
       auto operand = fix_pseudo(push.operand.get());
-      return make_add_and_return<AsmPush>(instructions_, operand);
+      if (isLargerThanInt32(operand)) {
+        auto reg10 = make_asm<AsmRegister>(AsmInstType::QUAD, AsmReg::R10);
+        add_inst<AsmMov>(instructions_, AsmInstType::QUAD, operand, reg10);
+        return add_inst<AsmPush>(instructions_, reg10);
+      }
+
+      return add_inst<AsmPush>(instructions_, operand);
     }
 
     std::shared_ptr<Asm> operator()(const AsmCall& call) {
-      return make_add_and_return<AsmCall>(instructions_, call.fname);
+      return add_inst<AsmCall>(instructions_, call.fname);
     }
 
     std::shared_ptr<Asm> operator()(const AsmReturn& ret) {
-      return make_add_and_return<AsmReturn>(instructions_, ret.dummy);
+      return add_inst<AsmReturn>(instructions_, ret.dummy);
     }
 
     std::shared_ptr<Asm> operator()(const AsmImm& imm) {
@@ -215,27 +347,29 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
     }
 
     std::shared_ptr<Asm> operator()(const AsmRegister& reg) {
-      return make_asm<AsmRegister>(reg.reg, reg.size);
+      return make_asm<AsmRegister>(reg.type, reg.reg);
     }
 
     std::shared_ptr<Asm> operator()(const AsmPseudo& pseudo) {
-      // TODO: only integers for now
       int stack_offset = 0;
       auto it = reg_to_offset_.find(pseudo.identifier);
       if (it == reg_to_offset_.end()) {
         // Not a stack var. Look in static section.
-        auto sit = symtab_.find(pseudo.identifier);
-        if (sit != symtab_.end()) {
-          auto var = sit->second;
-          if (var->getAttrs()->getAttributeType() == SymbolAttrs::STATIC_ATTR) {
-            return make_asm<AsmData>(pseudo.identifier);
-          }
+        auto sym = symtab_.findSymbol(pseudo.identifier);
+        assert(sym != nullptr);
+        if (sym->isStatic()) {
+          return make_asm<AsmData>(pseudo.identifier);
+        } else {
+          AsmInstType type = sym->getType();
+          int alignment = 8;// (type == AsmInstType::LONG) ? 4 : 8;
+          int byte_size = 8;//(type == AsmInstType::LONG) ? 4 : 8;
+          // align next stack argument to a multiple of 8
+          int next_stack_offset = roundUp(fn_stack_size_ + byte_size, alignment);
+          // stack locals stored as -ve offset relative to base
+          stack_offset = -next_stack_offset;
+          fn_stack_size_ = next_stack_offset;
+          reg_to_offset_[pseudo.identifier] = stack_offset;
         }
-
-        fn_stack_size_ += 4;
-        // stack locals stored as -ve offset relative to base
-        stack_offset = -fn_stack_size_;
-        reg_to_offset_[pseudo.identifier] = stack_offset;
       } else {
         stack_offset = it->second;
       }
@@ -252,7 +386,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
     }
   };
 
-  ReplacePseudo fixed_prog(symtab_);
+  ReplacePseudo fixed_prog(asm_symtab_);
   return fixed_prog.fix(prog);
 }
 
@@ -280,9 +414,10 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
 
   // copy params to registers
   for (int i = 0; i < num_reg_params; ++i) {
-    auto reg = make_asm<AsmRegister>(arg_regs_[i], AsmWordSize::LONG);
-    auto param = gen(fn.params[i].get());
-    add_inst<AsmMov>(instructions_, reg, param);
+    auto param = fn.params[i];
+    AsmInstType type = get_type(param);
+    auto reg = make_asm<AsmRegister>(type, arg_regs_[i]);
+    add_inst<AsmMov>(instructions_, type, reg, gen(param.get()));
   }
 
   // pass arguments on stack
@@ -290,9 +425,10 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
   int param_stack_offset = 16;
   for (int i = 0; i < num_stack_args; ++i) {
     int index = num_reg_params + i;
-    auto param = gen(fn.params[index].get());
-    add_inst<AsmMov>(instructions_,
-                     make_asm<AsmStack>(param_stack_offset + 8 * i),  param);
+    auto param = fn.params[index];
+    add_inst<AsmMov>(instructions_, get_type(param),
+                     make_asm<AsmStack>(param_stack_offset + 8 * i),
+                     gen(param.get()));
   }
 
   // instructions
@@ -304,7 +440,14 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyStaticVar& svar) {
-  return make_asm<AsmStaticVar>(svar.global, svar.name, svar.init);
+  int alignment = 0;
+  if (svar.init.getType() == InitialValue::INITIAL_LONG_VALUE) {
+    alignment = 8;
+  } else if (svar.init.getType() == InitialValue::INITIAL_INT32_VALUE) {
+    alignment = 4;
+  }
+
+  return make_asm<AsmStaticVar>(svar.global, svar.name, alignment, svar.init);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
@@ -312,6 +455,7 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
   auto src1 = gen(bin.src1.get());
   auto src2 = gen(bin.src2.get());
   auto dest = gen(bin.dest.get());
+  AsmInstType type = get_type(bin.src1);
 
   TokenType optype = bin.op.type;
   if (isRelationalOp(optype)) {
@@ -343,9 +487,9 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
     // Cmp(src2, src1)
     // Mov(Imm(0), dst)
     // SetCC(relational_operator, dst)
-    add_inst<AsmCmp>(instructions_, src2, src1);
-    add_inst<AsmMov>(instructions_, make_asm<AsmImm>(0), dest);
-    return make_add_and_return<AsmSetCC>(instructions_, cc, dest);
+    add_inst<AsmCmp>(instructions_, type, src2, src1);
+    add_inst<AsmMov>(instructions_, type, make_asm<AsmImm>(0), dest);
+    return add_inst<AsmSetCC>(instructions_, cc, dest);
   } else if ((optype == TokenType::SLASH) ||
       (optype == TokenType::PERCENT)) {
     // division and remainder
@@ -354,16 +498,32 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
     // Idiv(src2)
     // Mov(Reg(AX) or Reg(DX), dst)
     AsmReg reg = (optype == TokenType::SLASH) ? AsmReg::AX : AsmReg::DX;
-    add_inst<AsmMov>(instructions_, src1, make_asm<AsmRegister>(AsmReg::AX, AsmWordSize::LONG));
-    add_inst<AsmCdq>(instructions_, 0);
-    add_inst<AsmIdiv>(instructions_, src2);
-    return make_add_and_return<AsmMov>(instructions_,
-       make_asm<AsmRegister>(reg, AsmWordSize::LONG), dest);
+    add_inst<AsmMov>(instructions_, type, src1,
+                     make_asm<AsmRegister>(type, AsmReg::AX));
+    add_inst<AsmCdq>(instructions_, type, 0);
+    add_inst<AsmIdiv>(instructions_, type, src2);
+    return add_inst<AsmMov>(instructions_, type,
+                            make_asm<AsmRegister>(type, reg), dest);
   } else { // everything else
     // Mov(src1, dst)
     // Binary(op, src2, dst)
-    add_inst<AsmMov>(instructions_, src1, dest);
-    return make_add_and_return<AsmBinary>(instructions_, bin.op, src2, dest);
+    add_inst<AsmMov>(instructions_, type, src1, dest);
+    AsmInst op = AsmInst::INST_ERR;
+    switch (bin.op.type) {
+    case TokenType::PLUS:
+      op = AsmInst::ADD;
+      break;
+    case TokenType::MINUS:
+      op = AsmInst::SUB;
+      break;
+    case TokenType::STAR:
+      op = AsmInst::MUL;
+      break;
+    default:
+      break;
+    }
+
+    return add_inst<AsmBinary>(instructions_, type, op, src2, dest);
   }
 
   return nullptr;
@@ -373,20 +533,37 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyUnary& unary) {
   // src and dest can only be constants or var
   auto src = gen(unary.src.get());
   auto dest = gen(unary.dest.get());
+  AsmInstType type = get_type(unary.src);
 
   if (unary.op.type == TokenType::BANG) {
-    add_inst<AsmCmp>(instructions_, make_asm<AsmImm>(0), src);
-    add_inst<AsmMov>(instructions_, make_asm<AsmImm>(0), dest);
-    return make_add_and_return<AsmSetCC>(instructions_, AsmCondCode::E, dest);
+    add_inst<AsmCmp>(instructions_, type, make_asm<AsmImm>(0), src);
+    add_inst<AsmMov>(instructions_, type, make_asm<AsmImm>(0), dest);
+    return add_inst<AsmSetCC>(instructions_, AsmCondCode::E, dest);
   } else {
-    add_inst<AsmMov>(instructions_, src, dest);
-    return make_add_and_return<AsmUnary>(instructions_, unary.op, dest);
+    add_inst<AsmMov>(instructions_, type, src, dest);
+    AsmInst op = AsmInst::INST_ERR;
+    switch (unary.op.type) {
+    case TokenType::TILDE:
+      op = AsmInst::NOT;
+      break;
+    case TokenType::MINUS:
+      // For unary expressions, - is lowered to a negation.
+      op = AsmInst::NEG;
+      break;
+    default:
+      break;
+    }
+    return add_inst<AsmUnary>(instructions_, type, op, dest);
   }
 
   return nullptr;
 }
 
-std::shared_ptr<Asm> AsmGen::operator()(const TackyConstant& constant) {
+std::shared_ptr<Asm> AsmGen::operator()(const TackyConstInt32& constant) {
+  return make_asm<AsmImm>(constant.value);
+}
+
+std::shared_ptr<Asm> AsmGen::operator()(const TackyConstInt64& constant) {
   return make_asm<AsmImm>(constant.value);
 }
 
@@ -397,14 +574,29 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyVar& var) {
 std::shared_ptr<Asm> AsmGen::operator()(const TackyReturn& ret) {
   // tacky return can only be constants or var
   auto expr = gen(ret.value.get());
-  add_inst<AsmMov>(instructions_, expr, make_asm<AsmRegister>(AsmReg::AX, AsmWordSize::LONG));
-  return make_add_and_return<AsmReturn>(instructions_, 0);
+  AsmInstType type = get_type(ret.value);
+  add_inst<AsmMov>(instructions_, type, expr,
+                   make_asm<AsmRegister>(type, AsmReg::AX));
+  return add_inst<AsmReturn>(instructions_, 0);
+}
+
+std::shared_ptr<Asm> AsmGen::operator()(const TackyTruncate& trunc) {
+  auto src = gen(trunc.src.get());
+  auto dest = gen(trunc.dest.get());
+  return add_inst<AsmMov>(instructions_, AsmInstType::LONG, src,
+                                     dest);
+}
+
+std::shared_ptr<Asm> AsmGen::operator()(const TackySignExtend& ext) {
+  auto src = gen(ext.src.get());
+  auto dest = gen(ext.dest.get());
+  return add_inst<AsmMovsx>(instructions_, src, dest);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyCopy& copy) {
   auto src = gen(copy.src.get());
   auto dest = gen(copy.dest.get());
-  return make_add_and_return<AsmMov>(instructions_, src, dest);
+  return add_inst<AsmMov>(instructions_, get_type(copy.src), src, dest);
 }
 
 std::shared_ptr<Asm> AsmGen::get_label(std::shared_ptr<Tacky> inst) {
@@ -418,25 +610,27 @@ std::shared_ptr<Asm> AsmGen::get_label(std::shared_ptr<Tacky> inst) {
 // not desired.
 std::shared_ptr<Asm> AsmGen::operator()(const TackyJump& jmp) {
   auto target = get_label(jmp.target);
-  return make_add_and_return<AsmJmp>(instructions_, target);
+  return add_inst<AsmJmp>(instructions_, target);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyJumpIfZero& jmp) {
   auto cond = gen(jmp.condition.get());
   auto target = get_label(jmp.target);
-  add_inst<AsmCmp>(instructions_, make_asm<AsmImm>(0), cond);
-  return make_add_and_return<AsmJmpCC>(instructions_, AsmCondCode::E, target);
+  AsmInstType type = get_type(jmp.condition);
+  add_inst<AsmCmp>(instructions_, type, make_asm<AsmImm>(0), cond);
+  return add_inst<AsmJmpCC>(instructions_, AsmCondCode::E, target);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyJumpIfNotZero& jmp) {
   auto cond = gen(jmp.condition.get());
   auto target = get_label(jmp.target);
-  add_inst<AsmCmp>(instructions_, make_asm<AsmImm>(0), cond);
-  return make_add_and_return<AsmJmpCC>(instructions_, AsmCondCode::NE, target);
+  AsmInstType type = get_type(jmp.condition);
+  add_inst<AsmCmp>(instructions_, type, make_asm<AsmImm>(0), cond);
+  return add_inst<AsmJmpCC>(instructions_, AsmCondCode::NE, target);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyLabel& label) {
-  return make_add_and_return<AsmLabel>(instructions_, label.identifier);
+  return add_inst<AsmLabel>(instructions_, label.identifier);
 }
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyFunCall& call) {
@@ -449,32 +643,37 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunCall& call) {
   if ((num_stack_args % 2) != 0) {
     stack_padding = 8;
     // pad by 8 if odd number of stack args
-    add_inst<AsmAllocateStack>(instructions_, stack_padding);
+    add_inst<AsmBinary>(instructions_, AsmInstType::QUAD,
+                        AsmInst::SUB,
+                        make_asm<AsmImm>(stack_padding),
+                        make_asm<AsmRegister>(AsmInstType::QUAD, SP));
   }
 
   // pass arguments in registers
   for (int i = 0; i < num_reg_args; ++i) {
-    auto reg = make_asm<AsmRegister>(arg_regs_[i], AsmWordSize::LONG);
-    auto res = gen(call.args[i].get());
-    add_inst<AsmMov>(instructions_, res, reg);
+    auto arg = call.args[i];
+    AsmInstType type = get_type(arg);
+    auto reg = make_asm<AsmRegister>(type, arg_regs_[i]);
+    auto res = gen(arg.get());
+    add_inst<AsmMov>(instructions_, get_type(arg), res, reg);
   }
 
   // pass arguments on stack
-  auto regAX_word = make_asm<AsmRegister>(AX, AsmWordSize::LONG);
-  auto regAX_quad = make_asm<AsmRegister>(AX, AsmWordSize::QUAD);
   for (int i = 0; i < num_stack_args; ++i) {
     int index = total_args - i - 1;
-    auto res = gen(call.args[index].get());
-    if (std::holds_alternative<AsmImm>(*res)) {
+    auto arg = call.args[index];
+    auto res = gen(arg.get());
+    if (std::get_if<AsmImm>(res.get()) ||
+        std::get_if<AsmRegister>(res.get()) ||
+        (get_type(arg) == AsmInstType::QUAD)) {
       add_inst<AsmPush>(instructions_, res);
-    } else if (auto reg = std::get_if<AsmRegister>(res.get())) {
-      // stack push is 16 bytes
-      add_inst<AsmPush>(instructions_,
-                        make_asm<AsmRegister>(reg->reg, AsmWordSize::QUAD));
     } else {
-      add_inst<AsmMov>(instructions_, make_asm<AsmImm>(0), regAX_word);
-      add_inst<AsmMov>(instructions_, res, regAX_word);
-      add_inst<AsmPush>(instructions_, regAX_quad);
+      auto reg = make_asm<AsmRegister>(AsmInstType::LONG, AX);
+      auto reg_quad = make_asm<AsmRegister>(AsmInstType::QUAD, AX);
+      add_inst<AsmMov>(instructions_, AsmInstType::LONG, make_asm<AsmImm>(0),
+                       reg);
+      add_inst<AsmMov>(instructions_, AsmInstType::LONG, res, reg);
+      add_inst<AsmPush>(instructions_, reg_quad);
     }
   }
 
@@ -484,11 +683,16 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunCall& call) {
   // remove args from stack
   int bytes_dealloc = 8 * num_stack_args + stack_padding;
   if (bytes_dealloc > 0) {
-    add_inst<AsmDeallocateStack>(instructions_, bytes_dealloc);
+    add_inst<AsmBinary>(instructions_, AsmInstType::QUAD,
+                        AsmInst::ADD,
+                        make_asm<AsmImm>(bytes_dealloc),
+                        make_asm<AsmRegister>(AsmInstType::QUAD, SP));
   }
 
   // retrieve return value
+  AsmInstType return_type = get_type(call.dest);
   auto dest = gen(call.dest.get());
-  add_inst<AsmMov>(instructions_, regAX_word, dest);
+  auto return_reg = make_asm<AsmRegister>(return_type, AsmReg::AX);
+  add_inst<AsmMov>(instructions_, return_type, return_reg, dest);
   return dest;
 }

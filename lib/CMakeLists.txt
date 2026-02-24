@@ -19,6 +19,7 @@ add_library(ccomplib
             Resolver.cc
             TypeResolver.cc
             TackyGen.cc
+            AsmSymbolTable.cc
             AsmGen.cc
             Codegen.cc
             ${AST_GEN_FILES})

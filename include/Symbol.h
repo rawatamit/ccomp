@@ -1,7 +1,6 @@
 #ifndef SYMBOL_H
 #define SYMBOL_H
 
-#include "Token.h"
 #include <memory>
 
 namespace ccomp {
@@ -13,21 +12,22 @@ class Type;
 
 struct InitialValue {
   static const int TENTATIVE_VALUE = 0;
-  static const int INITIAL_VALUE = 1;
-  static const int NOINIT_VALUE = 2;
+  static const int INITIAL_INT32_VALUE = 1;
+  static const int INITIAL_LONG_VALUE = 2;
+  static const int NOINIT_VALUE = 3;
 
   InitialValue() :
     type_(NOINIT_VALUE), value_(0) {}
 
-  InitialValue(int type, int value=0) :
+  InitialValue(int type, long value=0) :
     type_(type), value_(value) {}
 
   int getType() const { return type_; }
-  int getValue() const { return value_; }
+  long getValue() const { return value_; }
 
 private:
   int type_;
-  int value_;
+  long value_;
 };
 
 struct SymbolAttrs {

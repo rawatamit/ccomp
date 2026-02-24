@@ -38,7 +38,7 @@ public:
                                   Variable* var, std::shared_ptr<Scope> scope);
 
   std::shared_ptr<Scope> getEnclosingScope() const;
-  int getLevel() const;
+  int getNestingLevel() const;
   std::shared_ptr<Symbol> resolve(const Token& name) const;
 
 private:

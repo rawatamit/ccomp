@@ -4,12 +4,12 @@
 #include "Token.h"
 #include "Expr.h"
 #include "Scope.h"
-#include "Type.h"
 #include <memory>
 #include <vector>
 #include <variant>
 
 namespace ccomp {
+class Type;
 class Block;
 class Expression;
 class FunctionParam;
@@ -23,6 +23,7 @@ class Decl;
 class Null;
 class Break;
 class Continue;
+typedef const Type* type_ptr;
 using Stmt = std::variant<Block, Expression, FunctionParam, Function, If, Return, DoWhile, While, For, Decl, Null, Break, Continue>;
 class Block {
 public: 
@@ -48,7 +49,6 @@ public:
   Token type;
   Token name;
   std::shared_ptr<Symbol> sym;
-  const Type* evalty=0;
 };
 
 class Function {
@@ -63,7 +63,6 @@ public:
   std::vector<std::unique_ptr<Stmt>> params;
   std::unique_ptr<Stmt> body;
   std::shared_ptr<Symbol> sym;
-  std::unique_ptr<FunctionType> evalty;
 };
 
 class If {
@@ -83,6 +82,7 @@ public:
 public: 
   Token keyword;
   std::unique_ptr<Expr> value;
+  type_ptr fnReturnTy;
 };
 
 class DoWhile {

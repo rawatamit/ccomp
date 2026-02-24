@@ -10,7 +10,7 @@
 using namespace ccomp;
 
 TackyGen::TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts,
-                   const TypeResolver::TypeTable& symtab, ErrorHandler& errorHandler) :
+                   SymTabT& symtab, ErrorHandler& errorHandler) :
   stmts_(stmts), symtab_(symtab), errorHandler_(errorHandler)
 {}
 
@@ -30,12 +30,13 @@ std::shared_ptr<Tacky> TackyGen::gen() {
     const SymbolAttrs* attrs = sym->getAttrs();
     if (attrs->getAttributeType() == SymbolAttrs::STATIC_ATTR) {
       const InitialValue& initValue = attrs->getInitValue();
-      if (initValue.getType() == InitialValue::INITIAL_VALUE) {
+      if (initValue.getType() == InitialValue::INITIAL_INT32_VALUE ||
+          initValue.getType() == InitialValue::INITIAL_LONG_VALUE) {
         defs.emplace_back(make_tacky<TackyStaticVar>(
-            attrs->isGlobal(), sym->getName(), initValue.getValue()));
+            attrs->isGlobal(), sym->getName(), initValue));
       } else if (initValue.getType() == InitialValue::TENTATIVE_VALUE) {
         defs.emplace_back(make_tacky<TackyStaticVar>(
-            attrs->isGlobal(), sym->getName(), 0));
+            attrs->isGlobal(), sym->getName(), InitialValue()));
       }
     }
   }
@@ -57,9 +58,18 @@ void TackyGen::gen(const std::vector<std::unique_ptr<Stmt>>& stmts) {
   }
 }
 
-std::string TackyGen::unique_var() {
+std::shared_ptr<Tacky> TackyGen::make_tacky_var(const Type* ty) {
   static int nextId = 0;
-  return std::format("tmp.{}", nextId++);
+  std::string name = std::format("make_tacky_var.{}.tmp.{}", nextId, nextId++);
+  return add_to_symtab(name, ty);
+}
+
+std::shared_ptr<Tacky> TackyGen::add_to_symtab(const std::string& name, const Type* ty) {
+  auto sym = std::make_shared<Symbol>(name, false, nullptr);
+  sym->setType(ty);
+  sym->setAttrs(std::make_unique<SymbolAttrs>());
+  symtab_.emplace(name, sym);
+  return make_tacky<TackyVar>(name);
 }
 
 std::string TackyGen::unique_label(const std::string& desc) {
@@ -99,7 +109,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Function& fn) {
 
     // return 0 statement added to every function
     instructions_.emplace_back(
-        make_tacky<TackyReturn>(make_tacky<TackyConstant>(0)));
+        make_tacky<TackyReturn>(make_tacky<TackyConstInt32>(0)));
     bool isGlobal = fn.sym->getAttrs()->isGlobal();
     return make_tacky<TackyFunction>(isGlobal, fn.sym->getName(),
                                      std::move(params),
@@ -110,7 +120,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Function& fn) {
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const FunctionParam& param) {
-  return make_tacky<TackyVar>(param.sym->getName());
+  return add_to_symtab(param.sym->getName(), param.sym->getType());
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const If& ifstmt) {
@@ -310,7 +320,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Conditional& ternary) {
   // v1 = <result of e1>
   // result = v1
   auto thenRes = gen(ternary.thenExp.get());
-  auto result = make_tacky<TackyVar>(unique_var());
+  auto result = make_tacky_var(ternary.evalty);
   instructions_.emplace_back(make_tacky<TackyCopy>(thenRes, result));
 
   // Jump(end)
@@ -332,10 +342,10 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Conditional& ternary) {
 }
 
 std::shared_ptr<Tacky> TackyGen::genLogical(const BinaryExpr& expr) {
-  TokenType op = expr.Operator.type;
+  TokenType op = expr.op.type;
   // <instructions for e1>
   // v1 = <result of e1>
-  std::shared_ptr<Tacky> v1 = gen(expr.left.get());
+  auto v1 = gen(expr.left.get());
 
   auto result_both_check_label = make_tacky<TackyLabel>(unique_label("logical"));
   auto end_label = make_tacky<TackyLabel>(unique_label("logical"));
@@ -351,7 +361,7 @@ std::shared_ptr<Tacky> TackyGen::genLogical(const BinaryExpr& expr) {
 
   // <instructions for e2>
   // v2 = <result of e2>
-  std::shared_ptr<Tacky> v2 = gen(expr.right.get());
+  auto v2 = gen(expr.right.get());
 
   // JumpIfZero|JumpIfNotZero(v2, result_both_check_label)
   if (op == TokenType::AMPERSAND_AMPERSAND) {
@@ -367,9 +377,9 @@ std::shared_ptr<Tacky> TackyGen::genLogical(const BinaryExpr& expr) {
   // conditions are false. Note we are using JumpIfZero for && and JumpIfNotZero
   // for ||.
   int result_after_two_checks = (op == TokenType::AMPERSAND_AMPERSAND) ? 1 : 0;
-  auto result = make_tacky<TackyVar>(unique_var());
+  auto result = make_tacky_var(expr.evalty);
   instructions_.emplace_back(make_tacky<TackyCopy>(
-    make_tacky<TackyConstant>(result_after_two_checks), result));
+    make_tacky<TackyConstInt32>(result_after_two_checks), result));
 
   // Jump(end)
   instructions_.emplace_back(make_tacky<TackyJump>(end_label));
@@ -380,7 +390,7 @@ std::shared_ptr<Tacky> TackyGen::genLogical(const BinaryExpr& expr) {
   // result = 0|1
   int result_after_label = 1 - result_after_two_checks;
   instructions_.emplace_back(
-    make_tacky<TackyCopy>(make_tacky<TackyConstant>(result_after_label), result));
+    make_tacky<TackyCopy>(make_tacky<TackyConstInt32>(result_after_label), result));
 
   // Label(end)
   instructions_.emplace_back(end_label);
@@ -390,7 +400,7 @@ std::shared_ptr<Tacky> TackyGen::genLogical(const BinaryExpr& expr) {
 std::shared_ptr<Tacky> TackyGen::operator()(const BinaryExpr& expr) {
   // binary_operator = Add | Subtract | Multiply | Divide | Remainder | Equal |
   // NotEqual | LessThan | LessOrEqual | GreaterThan | GreaterOrEqual
-  TokenType op = expr.Operator.type;
+  TokenType op = expr.op.type;
   bool isLogical = isLogicalOp(op);
   assert(one_of(op, {TokenType::PLUS, TokenType::MINUS, TokenType::STAR,
                 TokenType::SLASH, TokenType::PERCENT}) ||
@@ -402,51 +412,78 @@ std::shared_ptr<Tacky> TackyGen::operator()(const BinaryExpr& expr) {
   }
 
   // v1 = emit_tacky(e1, instructions)
-  std::shared_ptr<Tacky> src1 = gen(expr.left.get());
+  auto src1 = gen(expr.left.get());
 
   // v2 = emit_tacky(e2, instructions)
-  std::shared_ptr<Tacky> src2 = gen(expr.right.get());
+  auto src2 = gen(expr.right.get());
 
   // dst_name = make_temporary()
   // dst = Var(dst_name)
-  auto dst = make_tacky<TackyVar>(unique_var());
+  auto dst = make_tacky_var(expr.evalty);
 
   // tacky_op = convert_binop(op)
   // instructions.append(Binary(tacky_op, v1, v2, dst))
   // NOTE: tacky_op and expr->Operator are the same.
   instructions_.emplace_back(
-    make_tacky<TackyBinary>(expr.Operator, src1, src2, dst));
+    make_tacky<TackyBinary>(expr.op, src1, src2, dst));
   return dst;
 }
 
-std::shared_ptr<Tacky> TackyGen::operator()(const LiteralExpr& expr) {
-  assert(expr.type == TokenType::NUMBER);
-  return make_tacky<TackyConstant>(std::stoi(expr.value));
+std::shared_ptr<Tacky> TackyGen::operator()(const Int32Exp& num) {
+  return make_tacky<TackyConstInt32>(num.int32);
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const Int64Exp& num) {
+  return make_tacky<TackyConstInt64>(num.int64);
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const StringExp&) {
+  assert(0);
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const CastExpr& cexpr) {
+  auto val = gen(cexpr.expr.get());
+  // no promotion required
+  const Type* ty = cexpr.evalty;
+  if (ty == cexpr.exprty) {
+    return val;
+  }
+
+  auto dst = make_tacky_var(ty);
+  if (ty == BuiltInType::getInt64Ty()) {
+    instructions_.emplace_back(
+      make_tacky<TackySignExtend>(val, dst));
+  } else {
+    instructions_.emplace_back(
+      make_tacky<TackyTruncate>(val, dst));
+  }
+
+  return dst;
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const UnaryExpr& expr) {
   // unary_operator = Complement | Negate | Not
-  assert(one_of(expr.Operator.type, {TokenType::TILDE, TokenType::MINUS,
+  assert(one_of(expr.op.type, {TokenType::TILDE, TokenType::MINUS,
                 TokenType::BANG}));
 
   // src = emit_tacky(inner, instructions)
-  std::shared_ptr<Tacky> src = gen(expr.right.get());
+  auto src = gen(expr.right.get());
 
   // dst_name = make_temporary()
   // dst = Var(dst_name)
-  auto dst = make_tacky<TackyVar>(unique_var());
+  auto dst = make_tacky_var(expr.evalty);
 
   // tacky_op = convert_unop(op)
   // instructions.append(Unary(tacky_op, src, dst))
   // NOTE: tacky_op and expr->Operator are the same.
   instructions_.emplace_back(
-    make_tacky<TackyUnary>(expr.Operator, src, dst));
+    make_tacky<TackyUnary>(expr.op, src, dst));
 
   return dst;
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Variable& var) {
-  return make_tacky<TackyVar>(var.sym->getName());
+  return add_to_symtab(var.sym->getName(), var.sym->getType());
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const Call& call) {
@@ -460,7 +497,7 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Call& call) {
   }
 
   auto fname = fn->name.toString();
-  auto dst = make_tacky<TackyVar>(unique_var());
+  auto dst = make_tacky_var(call.evalty);
   instructions_.emplace_back(make_tacky<TackyFunCall>(fname, args, dst));
   return dst;
 }

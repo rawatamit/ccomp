@@ -57,6 +57,7 @@ private:
   Token previous();
   Token advance();
   Token peek() const;
+  Token peekNext() const;
   bool isAtEnd() const;
   bool check(TokenType type);
   Token consume(TokenType type, const std::string &message);
@@ -69,6 +70,8 @@ private:
     const std::vector<Token>& qualifiers) const;
   Scope::StorageClass getStorageClass(
     bool isFunction, const std::vector<Token>& qualifiers) const;
+  long parseLong(const Token& tok, bool isLongLiteral);
+  bool parseInt32OrLong(const Token& tok, int& int32, long& int64);
 
   size_t current;
   std::vector<Token> tokens_;

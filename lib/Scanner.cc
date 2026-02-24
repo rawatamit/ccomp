@@ -7,22 +7,21 @@ Scanner::Scanner(const std::string &aSource, ErrorHandler &aErrorHandler)
     : start(0), current(0), line(1), source(aSource),
       errorHandler(aErrorHandler) {
   // initialize reserved keywords map
-  reservedKeywords["int"] = TokenType::INT;
-  reservedKeywords["void"] = TokenType::VOID;
-  reservedKeywords["return"] = TokenType::RETURN;
-  reservedKeywords["else"] = TokenType::ELSE;
-  reservedKeywords["false"] = TokenType::FALSE;
-  reservedKeywords["if"] = TokenType::IF;
-  reservedKeywords["print"] = TokenType::PRINT;
-  reservedKeywords["return"] = TokenType::RETURN;
-  reservedKeywords["true"] = TokenType::TRUE;
-  reservedKeywords["for"] = TokenType::FOR;
-  reservedKeywords["while"] = TokenType::WHILE;
-  reservedKeywords["do"] = TokenType::DO;
-  reservedKeywords["break"] = TokenType::BREAK;
-  reservedKeywords["continue"] = TokenType::CONTINUE;
-  reservedKeywords["static"] = TokenType::STATIC;
-  reservedKeywords["extern"] = TokenType::EXTERN;
+  reservedKeywords = {
+    {"int", TokenType::INT},
+    {"long", TokenType::LONG},
+    {"void", TokenType::VOID},
+    {"return", TokenType::RETURN},
+    {"else", TokenType::ELSE},
+    {"if", TokenType::IF},
+    {"print", TokenType::PRINT},
+    {"for", TokenType::FOR},
+    {"while", TokenType::WHILE},
+    {"do", TokenType::DO},
+    {"break", TokenType::BREAK},
+    {"continue", TokenType::CONTINUE},
+    {"static", TokenType::STATIC},
+    {"extern", TokenType::EXTERN}};
 }
 
 char Scanner::advanceAndGetChar() {
@@ -172,13 +171,19 @@ void Scanner::identifier() {
   }
 }
 
-bool Scanner::isDigit(const char c) const { return c >= '0' && c <= '9'; }
+bool Scanner::isDigit(const char c) const {
+  return c >= '0' && c <= '9';
+}
 
 void Scanner::number() {
   while (isDigit(peek()))
     (void)advanceAndGetChar();
-  // look for fractional part
-  if (peek() == '.' && isDigit(peekNext())) {
+
+  // long numbers can have an [lL] at the end.
+  if (((peek() == 'l') || (peek() == 'L')) && !isAlpha(peekNext())) {
+    (void)advanceAndGetChar();
+  } else if (peek() == '.' && isDigit(peekNext())) {
+    // look for fractional part
     // consume the "."
     (void)advanceAndGetChar();
     while (isDigit(peek()))

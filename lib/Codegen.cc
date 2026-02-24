@@ -1,5 +1,4 @@
 #include "Codegen.h"
-#include "Token.h"
 #include <cassert>
 #include <format>
 #include <sstream>
@@ -26,6 +25,50 @@ std::string Codegen::code(std::vector<std::shared_ptr<Asm>> insts) {
     ss << code(inst);
   }
   return ss.str();
+}
+
+std::string Codegen::toInst(AsmInst op, AsmInstType type) const {
+  static std::unordered_map<AsmInst, std::string> opToInst = {
+    {AsmInst::ADD, "add"},
+    {AsmInst::SUB, "sub"},
+    {AsmInst::MUL, "imul"},
+    {AsmInst::NEG, "neg"},
+    {AsmInst::NOT, "not"},
+    {AsmInst::CALL, "call"},
+    {AsmInst::CMP, "cmp"},
+    {AsmInst::DIV, "idiv"},
+    {AsmInst::MOV, "mov"},
+  };
+
+  if (op == AsmInst::CDQ) {
+    switch (type) {
+    case BYTE:
+      return "cwd";
+    case LONG:
+      return "cdq";
+    case QUAD:
+      return "cqo";
+    default:
+      return "cdq::err";
+    }
+  } else if (op == AsmInst::PUSH) {
+    return "pushq";
+  } else if (op == AsmInst::JMP) {
+    return "jmp";
+  } else {
+    auto it = opToInst.find(op);
+    return addTypeSuffix(it->second, type);
+  }
+}
+
+std::string Codegen::addTypeSuffix(const std::string& inst, AsmInstType type) const {
+  if (type == AsmInstType::LONG) {
+    return std::format("{}l", inst);
+  } else if (type == AsmInstType::QUAD) {
+    return std::format("{}q", inst);
+  }
+
+  return "AsmInstType::ERROR";
 }
 
 std::string Codegen::operator()(const AsmProgram& prog) {
@@ -68,16 +111,30 @@ std::string Codegen::operator()(const AsmStaticVar& svar) {
     ss << "  .globl " << name << '\n';
   }
   
-  if (svar.init != 0) {
+  if (svar.init.getValue() != 0) {
     ss << "  .data\n";
-    ss << "  .align 4\n";
+    ss << "  .align " << svar.alignment << '\n';
     ss << name << ":\n";
-    ss << "  .long " << svar.init << '\n';
+
+    if (svar.init.getType() == InitialValue::INITIAL_INT32_VALUE) {
+      ss << "  .long ";
+    } else {
+      assert(svar.init.getType() == InitialValue::INITIAL_LONG_VALUE);
+      ss << "  .quad "; 
+    }
+
+    ss << svar.init.getValue() << '\n';
   } else {
     ss << "  .bss\n";
-    ss << "  .align 4\n";
+    ss << "  .align " << svar.alignment << '\n';
     ss << name << ":\n";
-    ss << "  .zero 4\n";
+
+    ss << "  .zero";
+    if (svar.init.getType() == InitialValue::INITIAL_INT32_VALUE) {
+      ss << "  4\n";
+    } else {
+      ss << "  8\n";
+    }
   }
 
   return ss.str();
@@ -85,48 +142,32 @@ std::string Codegen::operator()(const AsmStaticVar& svar) {
 
 std::string Codegen::operator()(const AsmUnary& unary) {
   auto operand = code(unary.operand);
-  switch (unary.op.type) {
-    case TokenType::MINUS:
-      return std::format("negl {}", operand);
-    case TokenType::TILDE:
-      return std::format("notl {}", operand);
-    default:
-      assert(0);
-      break;
-  }
-  return nullptr;
+  std::string inst = toInst(unary.op, unary.type);
+  return std::format("{} {}", inst, operand);
 }
 
 std::string Codegen::operator()(const AsmBinary& bin) {
   auto operand1 = code(bin.operand1);
   auto operand2 = code(bin.operand2);
-  switch (bin.op.type) {
-    case TokenType::PLUS:
-      return std::format("addl {}, {}", operand1, operand2);
-    case TokenType::MINUS:
-      return std::format("subl {}, {}", operand1, operand2);
-    case TokenType::STAR:
-      return std::format("imull {}, {}", operand1, operand2);
-    default:
-      assert(0);
-      break;
-  }
-  return nullptr;
+  std::string inst = toInst(bin.op, bin.type);
+  return std::format("{} {}, {}", inst, operand1, operand2);
 }
 
 std::string Codegen::operator()(const AsmCmp& cmp) {
   auto operand1 = code(cmp.operand1);
   auto operand2 = code(cmp.operand2);
-  return std::format("cmpl {}, {}", operand1, operand2);
+  std::string inst = toInst(AsmInst::CMP, cmp.type);
+  return std::format("{} {}, {}", inst, operand1, operand2);
 }
 
 std::string Codegen::operator()(const AsmIdiv& idiv) {
   auto operand = code(idiv.operand);
-  return std::format("idivl {}", operand);
+  std::string inst = toInst(AsmInst::DIV, idiv.type);
+  return std::format("{} {}", inst, operand);
 }
 
-std::string Codegen::operator()(const AsmCdq&) {
-  return std::format("cdq");
+std::string Codegen::operator()(const AsmCdq& cdq) {
+  return toInst(AsmInst::CDQ, cdq.type);
 }
 
 std::string Codegen::operator()(const AsmJmp& jmp) {
@@ -177,15 +218,14 @@ std::string Codegen::operator()(const AsmLabel& label) {
 std::string Codegen::operator()(const AsmMov& mov) {
   auto src = code(mov.src);
   auto dest = code(mov.dest);
-  return std::format("movl {}, {}", src, dest);
+  std::string inst = toInst(AsmInst::MOV, mov.type);
+  return std::format("{} {}, {}", inst, src, dest);
 }
 
-std::string Codegen::operator()(const AsmAllocateStack& alloc) {
-  return std::format("subq ${}, %rsp", alloc.size);
-}
-
-std::string Codegen::operator()(const AsmDeallocateStack& dealloc) {
-  return std::format("addq ${}, %rsp", dealloc.size);
+std::string Codegen::operator()(const AsmMovsx& mov) {
+  auto src = code(mov.src);
+  auto dest = code(mov.dest);
+  return std::format("movslq {}, {}", src, dest);
 }
 
 std::string Codegen::operator()(const AsmPush& push) {
@@ -207,57 +247,62 @@ std::string Codegen::operator()(const AsmReturn&) {
 
 std::string Codegen::operator()(const AsmRegister& reg) {
   static std::unordered_map<AsmReg,
-          std::unordered_map<AsmWordSize, std::string>> regmap = {
+          std::unordered_map<AsmInstType, std::string>> regmap = {
     {AsmReg::AX,
-          {{AsmWordSize::QUAD, "%rax"},
-           {AsmWordSize::LONG, "%eax"},
-           {AsmWordSize::BYTE, "%al"}}},
+          {{AsmInstType::QUAD, "%rax"},
+           {AsmInstType::LONG, "%eax"},
+           {AsmInstType::BYTE, "%al"}}},
 
     {AsmReg::CX,
-          {{AsmWordSize::QUAD, "%rcx"},
-           {AsmWordSize::LONG, "%ecx"},
-           {AsmWordSize::BYTE, "%cl"}}},
+          {{AsmInstType::QUAD, "%rcx"},
+           {AsmInstType::LONG, "%ecx"},
+           {AsmInstType::BYTE, "%cl"}}},
 
     {AsmReg::DX,
-          {{AsmWordSize::QUAD, "%rdx"},
-           {AsmWordSize::LONG, "%edx"},
-           {AsmWordSize::BYTE, "%dl"}}},
+          {{AsmInstType::QUAD, "%rdx"},
+           {AsmInstType::LONG, "%edx"},
+           {AsmInstType::BYTE, "%dl"}}},
 
     {AsmReg::DI,
-          {{AsmWordSize::QUAD, "%rdi"},
-           {AsmWordSize::LONG, "%edi"},
-           {AsmWordSize::BYTE, "%dil"}}},
+          {{AsmInstType::QUAD, "%rdi"},
+           {AsmInstType::LONG, "%edi"},
+           {AsmInstType::BYTE, "%dil"}}},
 
     {AsmReg::SI,
-          {{AsmWordSize::QUAD, "%rsi"},
-           {AsmWordSize::LONG, "%esi"},
-           {AsmWordSize::BYTE, "%sil"}}},
+          {{AsmInstType::QUAD, "%rsi"},
+           {AsmInstType::LONG, "%esi"},
+           {AsmInstType::BYTE, "%sil"}}},
 
     {AsmReg::R8,
-          {{AsmWordSize::QUAD, "%r8"},
-           {AsmWordSize::LONG, "%r8d"},
-           {AsmWordSize::BYTE, "%r8b"}}},
+          {{AsmInstType::QUAD, "%r8"},
+           {AsmInstType::LONG, "%r8d"},
+           {AsmInstType::BYTE, "%r8b"}}},
 
     {AsmReg::R9,
-          {{AsmWordSize::QUAD, "%r9"},
-           {AsmWordSize::LONG, "%r9d"},
-           {AsmWordSize::BYTE, "%r9b"}}},
+          {{AsmInstType::QUAD, "%r9"},
+           {AsmInstType::LONG, "%r9d"},
+           {AsmInstType::BYTE, "%r9b"}}},
 
     {AsmReg::R10,
-          {{AsmWordSize::QUAD, "%r10"},
-           {AsmWordSize::LONG, "%r10d"},
-           {AsmWordSize::BYTE, "%r10b"}}},
+          {{AsmInstType::QUAD, "%r10"},
+           {AsmInstType::LONG, "%r10d"},
+           {AsmInstType::BYTE, "%r10b"}}},
 
     {AsmReg::R11,
-          {{AsmWordSize::QUAD, "%r11"},
-           {AsmWordSize::LONG, "%r11d"},
-           {AsmWordSize::BYTE, "%r11b"}}}};
+          {{AsmInstType::QUAD, "%r11"},
+           {AsmInstType::LONG, "%r11d"},
+           {AsmInstType::BYTE, "%r11b"}}},
+
+    {AsmReg::SP,
+          {{AsmInstType::QUAD, "%rsp"},
+           {AsmInstType::LONG, "%esp"},
+           {AsmInstType::BYTE, "%spl"}}}};
 
   // find register
   auto regnames = regmap.find(reg.reg); 
   if (regnames != regmap.end()) {
     // find name based on size
-    auto it = regnames->second.find(reg.size);
+    auto it = regnames->second.find(reg.type);
     if (it != regnames->second.end()) {
       return it->second;
     }

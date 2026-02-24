@@ -16,7 +16,7 @@ bool Symbol::hasExternalLinkage() const
 
 int Symbol::getNestingLevel() const {
   if (scope_) {
-    return scope_->getLevel();
+    return scope_->getNestingLevel();
   }
 
   return -1;

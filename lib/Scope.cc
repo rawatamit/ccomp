@@ -7,7 +7,7 @@ Scope::Scope() :
 {}
 
 Scope::Scope(std::shared_ptr<Scope> enclosingScope) :
-  level_(enclosingScope ? (enclosingScope->getLevel() + 1) : 0),
+  level_(enclosingScope ? (enclosingScope->getNestingLevel() + 1) : 0),
   enclosingScope_(enclosingScope)
 {}
 
@@ -39,7 +39,7 @@ std::shared_ptr<Scope> Scope::getEnclosingScope() const {
   return enclosingScope_;
 }
 
-int Scope::getLevel() const {
+int Scope::getNestingLevel() const {
   return level_;
 }
 

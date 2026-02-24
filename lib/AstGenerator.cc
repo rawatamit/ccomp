@@ -84,10 +84,14 @@ public:
     file << "\nnamespace ccomp {" << '\n';
 
     // forward declarations
+    file << "class Type;\n";
     for (auto& type : astSpec.types) {
       auto className = std::get<0>(type);
       file << "class " << className << ";\n";
     }
+
+    // typedefs
+    file << "typedef const Type* type_ptr;\n";
 
     // variant specification
     file << "using " << baseName << " = std::variant<";
@@ -186,15 +190,28 @@ int main(int argc, char **argv) {
     std::cout << "ast_generator generating files in " << outDir << std::endl;
     const AstSpecification exprSpec = {
         "Expr",
-        {{"Assign", "std::unique_ptr<Expr> lvalue, std::unique_ptr<Expr> value", ""},
-         {"Conditional", "std::unique_ptr<Expr> condition, std::unique_ptr<Expr> thenExp, std::unique_ptr<Expr> elseExp", ""},
-         {"BinaryExpr", "std::unique_ptr<Expr> left, Token Operator, std::unique_ptr<Expr> right", ""},
-         {"LiteralExpr", "TokenType type, std::string value", ""},
-         {"UnaryExpr", "Token Operator, std::unique_ptr<Expr> right", ""},
-         {"Variable", "Token name", "std::shared_ptr<Symbol> sym, const Type* evalty=0"},
-         {"Call", "std::unique_ptr<Expr> callee, std::vector<std::unique_ptr<Expr>> args", "const Function* fn=0"}},
+        {{"Assign", "std::unique_ptr<Expr> lvalue, std::unique_ptr<Expr> value",
+          "type_ptr evalty=0"},
+         {"Conditional", "std::unique_ptr<Expr> condition, std::unique_ptr<Expr> thenExp, std::unique_ptr<Expr> elseExp",
+          "type_ptr evalty=0"},
+         {"BinaryExpr", "std::unique_ptr<Expr> left, Token op, std::unique_ptr<Expr> right",
+          "type_ptr evalty=0"},
+         {"Int32Exp", "Token tok, int int32",
+          "type_ptr evalty=0"},
+         {"Int64Exp", "Token tok, long int64",
+          "type_ptr evalty=0"},
+         {"StringExp", "Token tok, std::string str",
+          "type_ptr evalty=0"},
+         {"CastExpr", "Token type, std::unique_ptr<Expr> expr",
+          "type_ptr evalty=0, type_ptr exprty=0"},
+         {"UnaryExpr", "Token op, std::unique_ptr<Expr> right",
+          "type_ptr evalty=0"},
+         {"Variable", "Token name",
+          "std::shared_ptr<Symbol> sym, type_ptr evalty=0"},
+         {"Call", "std::unique_ptr<Expr> callee, std::vector<std::unique_ptr<Expr>> args",
+          "const Function* fn=0, type_ptr evalty=0"}},
         {},
-        {"\"Token.h\"", "\"Scope.h\"", "\"Type.h\"", "<memory>", "<string>", "<vector>", "<variant>"}};
+        {"\"Token.h\"", "\"Scope.h\"", "<memory>", "<string>", "<vector>", "<variant>"}};
     AstGen exprGenerator(outDir, exprSpec);
     exprGenerator.generate();
 
@@ -202,11 +219,11 @@ int main(int argc, char **argv) {
         "Stmt",
         {{"Block", "std::vector<std::unique_ptr<Stmt>> stmts", ""},
          {"Expression", "std::unique_ptr<Expr> expr", ""},
-         {"FunctionParam", "Token type, Token name", "std::shared_ptr<Symbol> sym, const Type* evalty=0"},
+         {"FunctionParam", "Token type, Token name", "std::shared_ptr<Symbol> sym"},
          {"Function", "bool fileScope, Token returnty, Scope::StorageClass storage, Token name, std::vector<std::unique_ptr<Stmt>> params, std::unique_ptr<Stmt> body",
-              "std::shared_ptr<Symbol> sym, std::unique_ptr<FunctionType> evalty"},
+              "std::shared_ptr<Symbol> sym"},
          {"If", "std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> thenBranch, std::unique_ptr<Stmt> elseBranch", ""},
-         {"Return", "Token keyword, std::unique_ptr<Expr> value", ""},
+         {"Return", "Token keyword, std::unique_ptr<Expr> value", "type_ptr fnReturnTy"},
          {"DoWhile", "std::unique_ptr<Stmt> body, std::unique_ptr<Expr> condition", "int loop_label"},
          {"While", "std::unique_ptr<Expr> condition, std::unique_ptr<Stmt> body", "int loop_label"},
          {"For", "std::unique_ptr<Stmt> init, std::unique_ptr<Expr> condition, std::unique_ptr<Expr> post, std::unique_ptr<Stmt> body", "int loop_label"},
@@ -215,7 +232,7 @@ int main(int argc, char **argv) {
          {"Break", "Token loc", "int loop_label"},
          {"Continue", "Token loc", "int loop_label"}},
         {},
-        {"\"Token.h\"", "\"Expr.h\"", "\"Scope.h\"", "\"Type.h\"", "<memory>", "<vector>", "<variant>"}};
+        {"\"Token.h\"", "\"Expr.h\"", "\"Scope.h\"", "<memory>", "<vector>", "<variant>"}};
     AstGen stmtGenerator(outDir, stmtSpec);
     stmtGenerator.generate();
 
@@ -223,12 +240,15 @@ int main(int argc, char **argv) {
         "Tacky",
         {{"TackyProgram", "std::vector<std::shared_ptr<Tacky>> functions, std::vector<std::shared_ptr<Tacky>> defs", ""},
          {"TackyFunction", "bool global, std::string name, std::vector<std::shared_ptr<Tacky>> params, std::vector<std::shared_ptr<Tacky>> instructions", ""},
-         {"TackyStaticVar", "bool global, std::string name, int init", ""},
+         {"TackyStaticVar", "bool global, std::string name, InitialValue init", ""},
          {"TackyUnary", "Token op, std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest", ""},
          {"TackyBinary", "Token op, std::shared_ptr<Tacky> src1, std::shared_ptr<Tacky> src2, std::shared_ptr<Tacky> dest", ""},
-         {"TackyConstant", "int value", ""},
+         {"TackyConstInt32", "int value", ""},
+         {"TackyConstInt64", "long value", ""},
          {"TackyVar", "std::string identifier", ""},
          {"TackyReturn", "std::shared_ptr<Tacky> value", ""},
+         {"TackyTruncate", "std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest", ""},
+         {"TackySignExtend", "std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest", ""},
          {"TackyCopy", "std::shared_ptr<Tacky> src, std::shared_ptr<Tacky> dest", ""},
          {"TackyJump", "std::shared_ptr<Tacky> target", ""},
          {"TackyJumpIfZero", "std::shared_ptr<Tacky> condition, std::shared_ptr<Tacky> target", ""},
@@ -244,31 +264,31 @@ int main(int argc, char **argv) {
         "Asm",
         {{"AsmProgram", "std::vector<std::shared_ptr<Asm>> functions", ""},
          {"AsmFunction", "bool global, std::string name, std::vector<std::shared_ptr<Asm>> instructions", ""},
-         {"AsmStaticVar", "bool global, std::string name, int init", ""},
-         {"AsmUnary", "Token op, std::shared_ptr<Asm> operand", ""},
-         {"AsmBinary", "Token op, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2", ""},
-         {"AsmCmp", "std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2", ""},
-         {"AsmIdiv", "std::shared_ptr<Asm> operand", ""},
-         {"AsmCdq", "int dummy", ""},
+         {"AsmStaticVar", "bool global, std::string name, int alignment, InitialValue init", ""},
+         {"AsmUnary", "AsmInstType type, AsmInst op, std::shared_ptr<Asm> operand", ""},
+         {"AsmBinary", "AsmInstType type, AsmInst op, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2", ""},
+         {"AsmCmp", "AsmInstType type, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2", ""},
+         {"AsmIdiv", "AsmInstType type, std::shared_ptr<Asm> operand", ""},
+         {"AsmCdq", "AsmInstType type, int dummy", ""},
          {"AsmJmp", "std::shared_ptr<Asm> target", ""},
          {"AsmJmpCC", "AsmCondCode cond_code, std::shared_ptr<Asm> target", ""},
          {"AsmSetCC", "AsmCondCode cond_code, std::shared_ptr<Asm> operand", ""},
          {"AsmLabel", "std::string identifier", ""},
-         {"AsmMov", "std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest", ""},
-         {"AsmAllocateStack", "int size", ""},
-         {"AsmDeallocateStack", "int size", ""},
+         {"AsmMov", "AsmInstType type, std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest", ""},
+         {"AsmMovsx", "std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest", ""},
          {"AsmPush", "std::shared_ptr<Asm> operand", ""},
          {"AsmCall", "std::string fname", ""},
          {"AsmReturn", "int dummy", ""},
-         {"AsmImm", "int value", ""},
-         {"AsmRegister", "AsmReg reg, AsmWordSize size", ""},
+         {"AsmImm", "long value", ""},
+         {"AsmRegister", "AsmInstType type, AsmReg reg", ""},
          {"AsmPseudo", "std::string identifier", ""},
          {"AsmStack", "int offset", ""},
          {"AsmData", "std::string identifier", ""}},
         {{"CondCode", {"E", "NE", "G", "GE", "L", "LE"}},
-         {"Reg", {"AX", "CX", "DX", "DI", "SI", "R8", "R9", "R10", "R11"}},
-         {"WordSize", {"QUAD", "LONG", "BYTE"}}},
-        {"\"Token.h\"", "<memory>", "<vector>", "<string>", "<variant>"}};
+         {"Reg", {"AX", "CX", "DX", "DI", "SI", "R8", "R9", "R10", "R11", "SP"}},
+         {"Inst", {"SUB", "ADD", "MUL", "NOT", "NEG", "MOV", "PUSH", "CALL", "CDQ", "DIV", "JMP", "CMP", "INST_ERR"}},
+         {"InstType", {"QUAD", "LONG", "BYTE", "ASM_TYPE_ERR"}}},
+        {"\"Token.h\"", "\"Symbol.h\"", "<memory>", "<vector>", "<string>", "<variant>"}};
     AstGen asmGenerator(outDir, asmSpec);
     asmGenerator.generate();
   }

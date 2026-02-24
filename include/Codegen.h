@@ -19,6 +19,8 @@ private:
 
   std::string code(std::shared_ptr<Asm> inst);
   std::string code(std::vector<std::shared_ptr<Asm>> insts);
+  std::string toInst(AsmInst op, AsmInstType type) const;
+  std::string addTypeSuffix(const std::string& inst, AsmInstType type) const;
 
 public:
   std::string operator()(const AsmProgram& Asm);
@@ -34,8 +36,7 @@ public:
   std::string operator()(const AsmSetCC& setcc);
   std::string operator()(const AsmLabel& label);
   std::string operator()(const AsmMov& Asm);
-  std::string operator()(const AsmAllocateStack& Asm);
-  std::string operator()(const AsmDeallocateStack& Asm);
+  std::string operator()(const AsmMovsx& Asm);
   std::string operator()(const AsmPush& Asm);
   std::string operator()(const AsmCall& Asm);
   std::string operator()(const AsmReturn& Asm);

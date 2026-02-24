@@ -11,13 +11,13 @@ namespace ccomp {
 class TackyGen {
 public:
   TackyGen(const std::vector<std::unique_ptr<Stmt>>& stmts,
-           const TypeResolver::TypeTable& symtab, ErrorHandler& errorHandler);
+           SymTabT& symtab, ErrorHandler& errorHandler);
   std::shared_ptr<Tacky> gen();
 
 private:
   const std::vector<std::unique_ptr<Stmt>>& stmts_;
   std::vector<std::shared_ptr<Tacky>> instructions_;
-  const TypeResolver::TypeTable& symtab_;
+  SymTabT& symtab_;
   ErrorHandler& errorHandler_;
 
   std::shared_ptr<Tacky> gen(Expr* expr);
@@ -25,7 +25,8 @@ private:
   void gen(const std::vector<std::unique_ptr<Stmt>>& stmts);
 
   std::shared_ptr<Tacky> genLogical(const BinaryExpr& expr);
-  std::string unique_var();
+  std::shared_ptr<Tacky> make_tacky_var(const Type* ty);
+  std::shared_ptr<Tacky> add_to_symtab(const std::string& name, const Type* ty);
   std::string unique_label(const std::string& desc);
   std::string break_label(int loop_label);
   std::string continue_label(int loop_label);
@@ -51,7 +52,10 @@ public:
   std::shared_ptr<Tacky> operator()(const Continue& stmt);
   std::shared_ptr<Tacky> operator()(const Conditional& expr);
   std::shared_ptr<Tacky> operator()(const BinaryExpr& expr);
-  std::shared_ptr<Tacky> operator()(const LiteralExpr& expr);
+  std::shared_ptr<Tacky> operator()(const Int32Exp& expr);
+  std::shared_ptr<Tacky> operator()(const Int64Exp& expr);
+  std::shared_ptr<Tacky> operator()(const StringExp& expr);
+  std::shared_ptr<Tacky> operator()(const CastExpr& expr);
   std::shared_ptr<Tacky> operator()(const UnaryExpr& expr);
   std::shared_ptr<Tacky> operator()(const Variable& expr);
   std::shared_ptr<Tacky> operator()(const Call&);

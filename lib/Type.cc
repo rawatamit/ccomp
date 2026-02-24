@@ -3,6 +3,7 @@
 using namespace ccomp;
 
 const BuiltInType BuiltInType::int32Ty_(INT32);
+const BuiltInType BuiltInType::int64Ty_(INT64);
 const BuiltInType BuiltInType::boolTy_(BOOLEAN);
 
 BuiltInType::BuiltInType(Kind kind) :
@@ -11,6 +12,10 @@ BuiltInType::BuiltInType(Kind kind) :
 
 const Type* BuiltInType::getInt32Ty() {
   return &int32Ty_;
+}
+
+const Type* BuiltInType::getInt64Ty() {
+  return &int64Ty_;
 }
 
 const Type* BuiltInType::getBoolTy() {

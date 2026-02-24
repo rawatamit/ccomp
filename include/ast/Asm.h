@@ -2,12 +2,14 @@
 #define Asm_H_
 
 #include "Token.h"
+#include "Symbol.h"
 #include <memory>
 #include <vector>
 #include <string>
 #include <variant>
 
 namespace ccomp {
+class Type;
 class AsmProgram;
 class AsmFunction;
 class AsmStaticVar;
@@ -21,8 +23,7 @@ class AsmJmpCC;
 class AsmSetCC;
 class AsmLabel;
 class AsmMov;
-class AsmAllocateStack;
-class AsmDeallocateStack;
+class AsmMovsx;
 class AsmPush;
 class AsmCall;
 class AsmReturn;
@@ -31,7 +32,8 @@ class AsmRegister;
 class AsmPseudo;
 class AsmStack;
 class AsmData;
-using Asm = std::variant<AsmProgram, AsmFunction, AsmStaticVar, AsmUnary, AsmBinary, AsmCmp, AsmIdiv, AsmCdq, AsmJmp, AsmJmpCC, AsmSetCC, AsmLabel, AsmMov, AsmAllocateStack, AsmDeallocateStack, AsmPush, AsmCall, AsmReturn, AsmImm, AsmRegister, AsmPseudo, AsmStack, AsmData>;
+typedef const Type* type_ptr;
+using Asm = std::variant<AsmProgram, AsmFunction, AsmStaticVar, AsmUnary, AsmBinary, AsmCmp, AsmIdiv, AsmCdq, AsmJmp, AsmJmpCC, AsmSetCC, AsmLabel, AsmMov, AsmMovsx, AsmPush, AsmCall, AsmReturn, AsmImm, AsmRegister, AsmPseudo, AsmStack, AsmData>;
 enum AsmCondCode {
   E,
   NE,
@@ -50,11 +52,28 @@ enum AsmReg {
   R9,
   R10,
   R11,
+  SP,
 };
-enum AsmWordSize {
+enum AsmInst {
+  SUB,
+  ADD,
+  MUL,
+  NOT,
+  NEG,
+  MOV,
+  PUSH,
+  CALL,
+  CDQ,
+  DIV,
+  JMP,
+  CMP,
+  INST_ERR,
+};
+enum AsmInstType {
   QUAD,
   LONG,
   BYTE,
+  ASM_TYPE_ERR,
 };
 class AsmProgram {
 public: 
@@ -76,55 +95,61 @@ public:
 
 class AsmStaticVar {
 public: 
-  AsmStaticVar(bool global, std::string name, int init) :
-    global(global), name(name), init(init) {}
+  AsmStaticVar(bool global, std::string name, int alignment, InitialValue init) :
+    global(global), name(name), alignment(alignment), init(init) {}
 public: 
   bool global;
   std::string name;
-  int init;
+  int alignment;
+  InitialValue init;
 };
 
 class AsmUnary {
 public: 
-  AsmUnary(Token op, std::shared_ptr<Asm> operand) :
-    op(op), operand(operand) {}
+  AsmUnary(AsmInstType type, AsmInst op, std::shared_ptr<Asm> operand) :
+    type(type), op(op), operand(operand) {}
 public: 
-  Token op;
+  AsmInstType type;
+  AsmInst op;
   std::shared_ptr<Asm> operand;
 };
 
 class AsmBinary {
 public: 
-  AsmBinary(Token op, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2) :
-    op(op), operand1(operand1), operand2(operand2) {}
+  AsmBinary(AsmInstType type, AsmInst op, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2) :
+    type(type), op(op), operand1(operand1), operand2(operand2) {}
 public: 
-  Token op;
+  AsmInstType type;
+  AsmInst op;
   std::shared_ptr<Asm> operand1;
   std::shared_ptr<Asm> operand2;
 };
 
 class AsmCmp {
 public: 
-  AsmCmp(std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2) :
-    operand1(operand1), operand2(operand2) {}
+  AsmCmp(AsmInstType type, std::shared_ptr<Asm> operand1, std::shared_ptr<Asm> operand2) :
+    type(type), operand1(operand1), operand2(operand2) {}
 public: 
+  AsmInstType type;
   std::shared_ptr<Asm> operand1;
   std::shared_ptr<Asm> operand2;
 };
 
 class AsmIdiv {
 public: 
-  AsmIdiv(std::shared_ptr<Asm> operand) :
-    operand(operand) {}
+  AsmIdiv(AsmInstType type, std::shared_ptr<Asm> operand) :
+    type(type), operand(operand) {}
 public: 
+  AsmInstType type;
   std::shared_ptr<Asm> operand;
 };
 
 class AsmCdq {
 public: 
-  AsmCdq(int dummy) :
-    dummy(dummy) {}
+  AsmCdq(AsmInstType type, int dummy) :
+    type(type), dummy(dummy) {}
 public: 
+  AsmInstType type;
   int dummy;
 };
 
@@ -164,27 +189,21 @@ public:
 
 class AsmMov {
 public: 
-  AsmMov(std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest) :
-    src(src), dest(dest) {}
+  AsmMov(AsmInstType type, std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest) :
+    type(type), src(src), dest(dest) {}
 public: 
+  AsmInstType type;
   std::shared_ptr<Asm> src;
   std::shared_ptr<Asm> dest;
 };
 
-class AsmAllocateStack {
+class AsmMovsx {
 public: 
-  AsmAllocateStack(int size) :
-    size(size) {}
+  AsmMovsx(std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest) :
+    src(src), dest(dest) {}
 public: 
-  int size;
-};
-
-class AsmDeallocateStack {
-public: 
-  AsmDeallocateStack(int size) :
-    size(size) {}
-public: 
-  int size;
+  std::shared_ptr<Asm> src;
+  std::shared_ptr<Asm> dest;
 };
 
 class AsmPush {
@@ -213,19 +232,19 @@ public:
 
 class AsmImm {
 public: 
-  AsmImm(int value) :
+  AsmImm(long value) :
     value(value) {}
 public: 
-  int value;
+  long value;
 };
 
 class AsmRegister {
 public: 
-  AsmRegister(AsmReg reg, AsmWordSize size) :
-    reg(reg), size(size) {}
+  AsmRegister(AsmInstType type, AsmReg reg) :
+    type(type), reg(reg) {}
 public: 
+  AsmInstType type;
   AsmReg reg;
-  AsmWordSize size;
 };
 
 class AsmPseudo {

@@ -36,6 +36,8 @@ private:
   bool hasLinkage_;
   std::unordered_map<std::string, std::shared_ptr<Symbol>> identifiers_;
 };
+
+typedef std::unordered_map<std::string, std::shared_ptr<Symbol>> SymTabT;
 } // namespace ccomp
 
 #endif // SYMBOL_TABLE_H

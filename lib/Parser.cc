@@ -60,10 +60,15 @@ std::unique_ptr<Stmt> Parser::function(bool fileScope, Token name, const std::ve
           error(peek(), "Function parameter contains void and typed parameters.");
         }
 
-        Token type = consume(TokenType::INT, "Expected type for parameter.");
-        Token name = consume(TokenType::IDENTIFIER, "Expected parameter name.");
+        // parse type and any storage qualifiers
+        std::vector<Token> qualifiers = parseQualifiers();
+        auto storage = getStorageClass(qualifiers);
+        if (storage != Scope::STORAGE_AUTO) {
+          error(peek(), "Function parameter contains storage qualifier.");
+        }
 
-        params.push_back(std::make_unique<Stmt>(FunctionParam(type, name)));
+        Token name = consume(TokenType::IDENTIFIER, "Expected parameter name.");
+        params.push_back(std::make_unique<Stmt>(FunctionParam(getType(qualifiers), name)));
       }
     } while (match({TokenType::COMMA}));
   }
@@ -342,7 +347,20 @@ std::unique_ptr<Expr> Parser::unary() {
     Token Operator = previous();
     auto right = unary();
     return std::make_unique<Expr>(UnaryExpr(Operator, std::move(right)));
+  } else if (check(TokenType::LEFT_PAREN) && isTypeQualifier(peekNext())) {
+    // '(' cast ')' expr
+    advance(); // consume '('
+    auto castType = parseQualifiers();
+    auto storage = getStorageClass(castType);
+    if (storage != Scope::STORAGE_AUTO) {
+      error(peek(), "Storage class in cast.");
+    }
+
+    consume(TokenType::RIGHT_PAREN, "Expected ')' after cast.");
+    // Note the call to unary, cast only binds to one expression after it
+    return std::make_unique<Expr>(CastExpr(getType(castType), unary()));
   }
+ 
   return call();
 }
 
@@ -377,21 +395,33 @@ std::unique_ptr<Expr> Parser::finishCall(std::unique_ptr<Expr> e) {
 }
 
 std::unique_ptr<Expr> Parser::primary() {
-  if (match({TokenType::FALSE}))
-    return std::make_unique<Expr>(LiteralExpr(TokenType::FALSE, "false"));
-  if (match({TokenType::TRUE}))
-    return std::make_unique<Expr>(LiteralExpr(TokenType::TRUE, "true"));
-  if (match({TokenType::NUMBER, TokenType::STRING}))
-    return std::make_unique<Expr>(LiteralExpr(previous().type, previous().literal));
-  if (match({TokenType::LEFT_PAREN})) {
+  if (match({TokenType::NUMBER})) {
+    Token tok = previous();
+    // choose between long and int. find how large this number is.
+    char backch = tok.lexeme.back();
+    if ((backch == 'l') || (backch == 'L')) {
+      return std::make_unique<Expr>(Int64Exp(tok, parseLong(tok, true)));
+    } else {
+      int int32 = 0;
+      long int64 = 0;
+      bool isInt32 = parseInt32OrLong(tok, int32, int64);
+      if (isInt32) {
+        return std::make_unique<Expr>(Int32Exp(tok, int32));
+      } else {
+        return std::make_unique<Expr>(Int64Exp(tok, int64));
+      }
+    }
+  } else if (match({TokenType::STRING})) {
+    return std::make_unique<Expr>(StringExp(previous(), previous().lexeme));
+  } else if (match({TokenType::LEFT_PAREN})) {
+    // '(' expr ')'
     auto expr = expression();
     consume(TokenType::RIGHT_PAREN, "Expected ')' after expression.");
     return expr;
-    // return std::static_pointer_cast<Expr>(std::make_unique<GroupingExpr>(expr));
-  }
-  if (match({TokenType::IDENTIFIER})) {
+  } else if (match({TokenType::IDENTIFIER})) {
     return std::make_unique<Expr>(Variable(previous()));
   }
+
   throw error(peek(), "Expected expression.");
   return nullptr;
 }
@@ -429,7 +459,17 @@ Token Parser::advance() {
   return previous();
 }
 
-Token Parser::peek() const { return tokens_[current]; }
+Token Parser::peek() const {
+  return tokens_[current];
+}
+
+Token Parser::peekNext() const {
+  if ((current + 1) < tokens_.size()) {
+    return tokens_[current+1];
+  }
+
+  assert(0);
+}
 
 bool Parser::isAtEnd() const { return peek().type == TokenType::END_OF_FILE; }
 
@@ -463,33 +503,64 @@ void Parser::synchronize() {
 }
 
 std::vector<Token> Parser::parseQualifiers() {
-  std::vector<Token> qualifiers;
+  std::vector<Token> allQualifiers;
   while (isDeclarationFirstSet()) {
-    qualifiers.emplace_back(advance());
+    allQualifiers.emplace_back(advance());
   }
 
-  if (qualifiers.empty()) {
+  if (allQualifiers.empty()) {
     error(peek(), "Expected qualifier in declaration.");
+    return allQualifiers;
+  }
+
+  int longTokIdx = -1;
+  int typeIdx = -1;
+  int storageIdx = -1;
+  int numTypeQualifiers = 0;
+
+  for (decltype(allQualifiers.size()) i = 0; i < allQualifiers.size(); ++i) {
+    const Token& tok = allQualifiers[i];
+    if (isStorageQualifier(tok)) {
+      if (storageIdx >= 0) {
+        error(tok, "Multiple storage qualifiers in declaration.");
+      }
+
+      storageIdx = i;
+    } else if (isTypeQualifier(tok)) {
+      bool isLong = (tok.type == TokenType::LONG);
+      if (isLong) {
+        longTokIdx = i;
+      } else {
+        typeIdx = i;
+      }
+
+      ++numTypeQualifiers;
+    }
+  }
+
+  if (numTypeQualifiers == 0) {
+    error(peek(), "Expected type qualifier in declaration.");
+  } else if (longTokIdx >= 0) {
+    if (numTypeQualifiers > 2) {
+      error(peek(), "Multiple type qualification in declaration.");
+    }
+  } else if (numTypeQualifiers > 2) {
+    error(peek(), "Expected unique type in declaration.");
+  }
+
+  std::vector<Token> qualifiers;
+  // add storage qualifier
+  if (storageIdx >= 0) {
+    qualifiers.emplace_back(allQualifiers[storageIdx]);
+  }
+
+  // add type qualifier
+  // long can be written as: long, long int, int long
+  // if long token is encountered, type is long
+  if (longTokIdx >= 0) {
+    qualifiers.emplace_back(allQualifiers[longTokIdx]);
   } else {
-    bool type_qualifier = false;
-    bool storage_qualifier = false;
-    for (Token& tok : qualifiers) {
-      if (isStorageQualifier(tok)) {
-        if (storage_qualifier) {
-          error(tok, "Multiple storage qualifiers in declaration.");
-        }
-
-        storage_qualifier = true;
-      }
-
-      if (tok.type == TokenType::INT) {
-        type_qualifier = true;
-      }
-    }
-
-    if (!type_qualifier) {
-      error(peek(), "Expected type qualifier in declaration.");
-    }
+    qualifiers.emplace_back(allQualifiers[typeIdx]);
   }
 
   return qualifiers;
@@ -497,7 +568,7 @@ std::vector<Token> Parser::parseQualifiers() {
 
 bool Parser::isDeclarationFirstSet() const {
   static std::vector<TokenType> firstSet =
-    {TokenType::INT, TokenType::STATIC, TokenType::EXTERN};
+    {TokenType::INT, TokenType::LONG, TokenType::STATIC, TokenType::EXTERN};
 
   if (!isAtEnd()) {
     auto it = std::find(firstSet.begin(), firstSet.end(), peek().type);
@@ -508,7 +579,7 @@ bool Parser::isDeclarationFirstSet() const {
 }
 
 bool Parser::isTypeQualifier(const Token& tok) const {
-  return (tok.type == TokenType::INT);
+  return (tok.type == TokenType::INT) || (tok.type == TokenType::LONG);
 }
 
 Token Parser::getType(const std::vector<Token>& qualifiers) const {
@@ -542,4 +613,44 @@ Scope::StorageClass Parser::getStorageClass(
   }
 
   return Scope::STORAGE_AUTO;
+}
+
+long Parser::parseLong(const Token& tok, bool isLongLiteral) {
+  try {
+    // Only one character is allowed to not parse.
+    size_t idx = 0;
+    long value = std::stol(tok.lexeme, &idx, 10);
+    if ((isLongLiteral ? idx+1 : idx) == tok.lexeme.size()) {
+      return value;
+    } else {
+      error(tok, "Incorrect format for long.");
+    }
+  } catch (const std::invalid_argument& e) {
+    error(tok, "Invalid long number.");
+  } catch (const std::out_of_range& e) {
+    error(tok, "Number out of range.");
+  }
+
+  return 0;
+}
+
+bool Parser::parseInt32OrLong(const Token& tok, int& int32, long& int64) {
+  // parse integer or long. returns true if integer is parsed, false if long.
+  try {
+    size_t idx = 0;
+    int32 = std::stoi(tok.lexeme, &idx, 10);
+    if (idx == tok.lexeme.size()) {
+      return true;
+    } else {
+      error(tok, "Incorrect format for integer.");
+    }
+  } catch (const std::invalid_argument& e) {
+    error(tok, "Invalid long number.");
+  } catch (const std::out_of_range& e) {
+    // Out of range for integer, may fit in long.
+    int64 = parseLong(tok, false);
+    return false;
+  }
+
+  return 0;
 }

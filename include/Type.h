@@ -13,6 +13,7 @@ class BuiltInType : public Type {
 private:
   enum Kind {
     INT32 = 0,
+    INT64 = 1,
     BOOLEAN,
     TYPE_ERROR
   };
@@ -22,11 +23,13 @@ private:
 
 public:
   static const Type* getInt32Ty();
+  static const Type* getInt64Ty();
   static const Type* getBoolTy();
 
 private:
   Kind kind_;
   const static BuiltInType int32Ty_;
+  const static BuiltInType int64Ty_;
   const static BuiltInType boolTy_;
 };
 
@@ -55,7 +58,7 @@ inline bool operator==(const ccomp::FunctionType& a, const ccomp::FunctionType& 
     return false;
   }
 
-  for (decltype(aParamTy.size()) i = 0; i < aParamTy.size(); ++i) {
+  for (size_t i = 0; i < aParamTy.size(); ++i) {
     if (aParamTy[i] != bParamTy[i]) {
       return false;
     }
