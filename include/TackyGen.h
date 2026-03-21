@@ -53,7 +53,9 @@ public:
   std::shared_ptr<Tacky> operator()(const Conditional& expr);
   std::shared_ptr<Tacky> operator()(const BinaryExpr& expr);
   std::shared_ptr<Tacky> operator()(const Int32Exp& expr);
+  std::shared_ptr<Tacky> operator()(const UInt32Exp& expr);
   std::shared_ptr<Tacky> operator()(const Int64Exp& expr);
+  std::shared_ptr<Tacky> operator()(const UInt64Exp& expr);
   std::shared_ptr<Tacky> operator()(const StringExp& expr);
   std::shared_ptr<Tacky> operator()(const CastExpr& expr);
   std::shared_ptr<Tacky> operator()(const UnaryExpr& expr);

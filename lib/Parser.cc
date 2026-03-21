@@ -398,9 +398,26 @@ std::unique_ptr<Expr> Parser::primary() {
   if (match({TokenType::NUMBER})) {
     Token tok = previous();
     // choose between long and int. find how large this number is.
-    char backch = tok.lexeme.back();
-    if ((backch == 'l') || (backch == 'L')) {
+    const std::string& lexeme = tok.lexeme;
+    if ((lexeme.back() == 'l') || (lexeme.back() == 'L')) {
+      if (lexeme.find("u") != std::string::npos || lexeme.find("U") != std::string::npos) {
+        bool fitsInUInt32 = false;
+        return std::make_unique<Expr>(UInt64Exp(tok, parseUnsignedLong(tok, fitsInUInt32)));
+      }
+
       return std::make_unique<Expr>(Int64Exp(tok, parseLong(tok, true)));
+    } else if ((lexeme.back() == 'u') || (lexeme.back() == 'U')) {
+      bool fitsInUInt32 = false;
+      if ((lexeme.find("l") != std::string::npos) || (lexeme.find("L") != std::string::npos)) {
+        return std::make_unique<Expr>(UInt64Exp(tok, parseUnsignedLong(tok, fitsInUInt32)));
+      }
+
+      uint64_t value = parseUnsignedLong(tok, fitsInUInt32, true);
+      if (fitsInUInt32) {
+        return std::make_unique<Expr>(UInt32Exp(tok, value));
+      } else {
+        return std::make_unique<Expr>(UInt64Exp(tok, value));
+      }
     } else {
       int int32 = 0;
       long int64 = 0;
@@ -513,39 +530,54 @@ std::vector<Token> Parser::parseQualifiers() {
     return allQualifiers;
   }
 
+  int unsignedIdx = -1;
   int longTokIdx = -1;
   int typeIdx = -1;
   int storageIdx = -1;
-  int numTypeQualifiers = 0;
+  int numStorageQualifiers = 0;
+  int numSignQualifiers = 0;
+  std::unordered_map<TokenType, std::vector<Token>> tokCount;
 
   for (decltype(allQualifiers.size()) i = 0; i < allQualifiers.size(); ++i) {
     const Token& tok = allQualifiers[i];
+    tokCount[tok.type].emplace_back(tok);
+
     if (isStorageQualifier(tok)) {
-      if (storageIdx >= 0) {
-        error(tok, "Multiple storage qualifiers in declaration.");
-      }
-
       storageIdx = i;
+      ++numStorageQualifiers;
     } else if (isTypeQualifier(tok)) {
-      bool isLong = (tok.type == TokenType::LONG);
-      if (isLong) {
+      switch (tok.type) {
+      case TokenType::SIGNED:
+        ++numSignQualifiers;
+        break;
+      case TokenType::UNSIGNED:
+        unsignedIdx = i;
+        ++numSignQualifiers;
+        break;
+      case TokenType::LONG:
         longTokIdx = i;
-      } else {
-        typeIdx = i;
+        break;
+      default:
+        break;
       }
 
-      ++numTypeQualifiers;
+      typeIdx = i;
     }
   }
 
-  if (numTypeQualifiers == 0) {
-    error(peek(), "Expected type qualifier in declaration.");
-  } else if (longTokIdx >= 0) {
-    if (numTypeQualifiers > 2) {
-      error(peek(), "Multiple type qualification in declaration.");
+  for (const auto& it : tokCount) {
+    const auto& toks = it.second;
+    if (toks.size() > 1) {
+      error(toks.front(), "Multiple type qualifiers in declaration.");
     }
-  } else if (numTypeQualifiers > 2) {
-    error(peek(), "Expected unique type in declaration.");
+  }
+
+  if (numStorageQualifiers > 1) {
+    error(peek(), "Multiple storage qualifiers in declaration.");
+  }
+
+  if (numSignQualifiers > 1) {
+    error(peek(), "Multiple sign qualifiers in declaration.");
   }
 
   std::vector<Token> qualifiers;
@@ -555,9 +587,14 @@ std::vector<Token> Parser::parseQualifiers() {
   }
 
   // add type qualifier
-  // long can be written as: long, long int, int long
-  // if long token is encountered, type is long
-  if (longTokIdx >= 0) {
+  if ((unsignedIdx >= 0) && (longTokIdx >= 0)) {
+    qualifiers.emplace_back(allQualifiers[unsignedIdx]);
+    qualifiers.emplace_back(allQualifiers[longTokIdx]);
+  } else if (unsignedIdx >= 0) {
+    qualifiers.emplace_back(allQualifiers[unsignedIdx]);
+  } else if (longTokIdx >= 0) {
+    // long can be written as: long, long int, int long
+    // if long token is encountered, type is long
     qualifiers.emplace_back(allQualifiers[longTokIdx]);
   } else {
     qualifiers.emplace_back(allQualifiers[typeIdx]);
@@ -567,8 +604,9 @@ std::vector<Token> Parser::parseQualifiers() {
 }
 
 bool Parser::isDeclarationFirstSet() const {
-  static std::vector<TokenType> firstSet =
-    {TokenType::INT, TokenType::LONG, TokenType::STATIC, TokenType::EXTERN};
+  static std::vector<TokenType> firstSet = {
+      TokenType::INT,      TokenType::LONG,   TokenType::SIGNED,
+      TokenType::UNSIGNED, TokenType::STATIC, TokenType::EXTERN};
 
   if (!isAtEnd()) {
     auto it = std::find(firstSet.begin(), firstSet.end(), peek().type);
@@ -579,17 +617,19 @@ bool Parser::isDeclarationFirstSet() const {
 }
 
 bool Parser::isTypeQualifier(const Token& tok) const {
-  return (tok.type == TokenType::INT) || (tok.type == TokenType::LONG);
+  return (tok.type == TokenType::INT) || (tok.type == TokenType::LONG) ||
+         (tok.type == TokenType::SIGNED) || (tok.type == TokenType::UNSIGNED);
 }
 
-Token Parser::getType(const std::vector<Token>& qualifiers) const {
+std::vector<Token> Parser::getType(const std::vector<Token>& qualifiers) const {
+  std::vector<Token> ret;
   for (const Token& tok : qualifiers) {
     if (isTypeQualifier(tok)) {
-      return tok;
+      ret.emplace_back(tok);
     }
   }
 
-  assert(0);
+  return ret;
 }
 
 Scope::StorageClass Parser::getStorageClass(
@@ -631,6 +671,52 @@ long Parser::parseLong(const Token& tok, bool isLongLiteral) {
     error(tok, "Number out of range.");
   }
 
+  return 0;
+}
+
+uint64_t Parser::parseUnsignedLong(const Token &tok, bool& fitsInUInt32,
+                                   bool parseUInt) {
+  try {
+    // Two characters are allowed to not parse.
+    size_t idx = 0;
+    uint64_t value = std::stoul(tok.lexeme, &idx, 10);
+    // When parseUInt is set, number can end in [uU].
+    if ((idx + 2 == tok.lexeme.size()) ||
+        (parseUInt && (idx + 1 == tok.lexeme.size()))) {
+      if (parseUInt) {
+        fitsInUInt32 = (static_cast<uint32_t>(value) == value);
+      }
+
+      return value;
+    } else {
+      error(tok, "Incorrect format for unsigned long.");
+    }
+  } catch (const std::invalid_argument &e) {
+    error(tok, "Invalid long number.");
+  } catch (const std::out_of_range &e) {
+    error(tok, "Number out of range.");
+  }
+
+  return 0;
+}
+
+uint32_t Parser::parseUnsignedInt(const Token& tok) {
+  try {
+    // Only one character is allowed to not parse.
+    size_t idx = 0;
+    // stoul to convert, but the value must fit inside unsigned int.
+    uint32_t value = std::stoul(tok.lexeme, &idx, 10);
+    if (idx+1 == tok.lexeme.size()) {
+      return value;
+    } else {
+      error(tok, "Incorrect format for unsigned int.");
+    }
+  } catch (const std::invalid_argument& e) {
+    error(tok, "Invalid long number.");
+  } catch (const std::out_of_range& e) {
+    error(tok, "Number out of range.");
+  }
+  
   return 0;
 }
 

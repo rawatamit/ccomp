@@ -47,6 +47,11 @@ inline int roundUp(int num, int multiple) {
   }
 }
 
+inline uint32_t truncateInt64ToInt32(uint64_t value) {
+  uint32_t trunc = value & 0xFFFFFFFF;
+  return trunc;
+}
+
 template<typename T, typename... Args>
 std::shared_ptr<Asm> make_asm(Args&&... args) {
   return std::make_shared<Asm>(T(std::forward<Args>(args)...));
@@ -74,11 +79,26 @@ inline bool isMemoryValue(std::shared_ptr<Asm> inst) {
           std::holds_alternative<AsmStack>(*inst));
 }
 
-inline const Type* getTypeFromToken(Token type) {
-  if (type.type == TokenType::INT) {
-    return BuiltInType::getInt32Ty();
-  } else if (type.type == TokenType::LONG) {
+inline const Type* getTypeFromTokens(const std::vector<Token>& type) {
+  bool isSigned = true;
+  bool isLong = false;
+
+  for (const Token& tok : type) {
+    if (tok.type == TokenType::UNSIGNED) {
+      isSigned = false;
+    } else if (tok.type == TokenType::LONG) {
+      isLong = true;
+    }
+  }
+
+  if (isSigned && isLong) {
     return BuiltInType::getInt64Ty();
+  } else if (isSigned && !isLong) {
+    return BuiltInType::getInt32Ty();
+  } else if (!isSigned && isLong) {
+    return BuiltInType::getUInt64Ty();
+  } else if (!isSigned && !isLong) {
+    return BuiltInType::getUInt32Ty();
   }
 
   return nullptr;

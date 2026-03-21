@@ -47,6 +47,8 @@ enum class TokenType {
   // Reserved keywords ARE identifiers but have seperate token types
   INT,
   LONG,
+  SIGNED,
+  UNSIGNED,
   VOID,
   CLASS,
   ELSE,

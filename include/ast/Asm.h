@@ -17,6 +17,7 @@ class AsmUnary;
 class AsmBinary;
 class AsmCmp;
 class AsmIdiv;
+class AsmDiv;
 class AsmCdq;
 class AsmJmp;
 class AsmJmpCC;
@@ -24,6 +25,7 @@ class AsmSetCC;
 class AsmLabel;
 class AsmMov;
 class AsmMovsx;
+class AsmMovZeroExtend;
 class AsmPush;
 class AsmCall;
 class AsmReturn;
@@ -33,7 +35,7 @@ class AsmPseudo;
 class AsmStack;
 class AsmData;
 typedef const Type* type_ptr;
-using Asm = std::variant<AsmProgram, AsmFunction, AsmStaticVar, AsmUnary, AsmBinary, AsmCmp, AsmIdiv, AsmCdq, AsmJmp, AsmJmpCC, AsmSetCC, AsmLabel, AsmMov, AsmMovsx, AsmPush, AsmCall, AsmReturn, AsmImm, AsmRegister, AsmPseudo, AsmStack, AsmData>;
+using Asm = std::variant<AsmProgram, AsmFunction, AsmStaticVar, AsmUnary, AsmBinary, AsmCmp, AsmIdiv, AsmDiv, AsmCdq, AsmJmp, AsmJmpCC, AsmSetCC, AsmLabel, AsmMov, AsmMovsx, AsmMovZeroExtend, AsmPush, AsmCall, AsmReturn, AsmImm, AsmRegister, AsmPseudo, AsmStack, AsmData>;
 enum AsmCondCode {
   E,
   NE,
@@ -41,6 +43,10 @@ enum AsmCondCode {
   GE,
   L,
   LE,
+  A,
+  AE,
+  B,
+  BE,
 };
 enum AsmReg {
   AX,
@@ -64,6 +70,7 @@ enum AsmInst {
   PUSH,
   CALL,
   CDQ,
+  IDIV,
   DIV,
   JMP,
   CMP,
@@ -144,6 +151,15 @@ public:
   std::shared_ptr<Asm> operand;
 };
 
+class AsmDiv {
+public: 
+  AsmDiv(AsmInstType type, std::shared_ptr<Asm> operand) :
+    type(type), operand(operand) {}
+public: 
+  AsmInstType type;
+  std::shared_ptr<Asm> operand;
+};
+
 class AsmCdq {
 public: 
   AsmCdq(AsmInstType type, int dummy) :
@@ -206,6 +222,15 @@ public:
   std::shared_ptr<Asm> dest;
 };
 
+class AsmMovZeroExtend {
+public: 
+  AsmMovZeroExtend(std::shared_ptr<Asm> src, std::shared_ptr<Asm> dest) :
+    src(src), dest(dest) {}
+public: 
+  std::shared_ptr<Asm> src;
+  std::shared_ptr<Asm> dest;
+};
+
 class AsmPush {
 public: 
   AsmPush(std::shared_ptr<Asm> operand) :
@@ -232,10 +257,10 @@ public:
 
 class AsmImm {
 public: 
-  AsmImm(long value) :
+  AsmImm(uint64_t value) :
     value(value) {}
 public: 
-  long value;
+  uint64_t value;
 };
 
 class AsmRegister {

@@ -48,28 +48,31 @@ std::vector<std::shared_ptr<Asm>> AsmGen::gen(
   return {};
 }
 
-AsmInstType AsmGen::get_type(std::shared_ptr<Tacky> inst) const {
+const Type* AsmGen::get_type(std::shared_ptr<Tacky> inst) const {
   const auto visitor = overloads{
-      [](const TackyProgram&) { return AsmInstType::ASM_TYPE_ERR; },
-      [](const TackyFunction&) { return AsmInstType::ASM_TYPE_ERR; },
-      [](const TackyStaticVar&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyProgram&) { return (const Type*)nullptr; },
+      [](const TackyFunction&) { return (const Type*)nullptr; },
+      [](const TackyStaticVar&) { return (const Type*)nullptr; },
       [this](const TackyUnary& expr) { return get_type(expr.src); },
       [this](const TackyBinary& expr) { return get_type(expr.src1); },
-      [](const TackyConstInt32&) { return AsmInstType::LONG; },
-      [](const TackyConstInt64&) { return AsmInstType::QUAD; },
+      [](const TackyConstInt32&) { return BuiltInType::getInt32Ty(); },
+      [](const TackyConstUInt32&) { return BuiltInType::getUInt32Ty(); },
+      [](const TackyConstInt64&) { return BuiltInType::getInt64Ty(); },
+      [](const TackyConstUInt64&) { return BuiltInType::getUInt64Ty(); },
       [this](const TackyVar& var) {
         auto it = symtab_.find(var.identifier);
         const Type* ty = it->second->getType();
-        return type_to_asm_type(ty);
+        return ty;
       },
-      [](const TackyReturn&) { return AsmInstType::ASM_TYPE_ERR; },
-      [](const TackyTruncate&) { return AsmInstType::LONG; },
-      [](const TackySignExtend&) { return AsmInstType::QUAD; },
+      [](const TackyReturn&) { return (const Type*)nullptr; },
+      [this](const TackyTruncate& trunc) { return get_type(trunc.dest); },
+      [this](const TackySignExtend& sext) { return get_type(sext.dest); },
+      [this](const TackyZeroExtend& zext) { return get_type(zext.dest); },
       [this](const TackyCopy& copy) { return get_type(copy.src); },
-      [](const TackyJump&) { return AsmInstType::ASM_TYPE_ERR; },
-      [](const TackyJumpIfZero&) { return AsmInstType::ASM_TYPE_ERR; },
-      [](const TackyJumpIfNotZero&) { return AsmInstType::ASM_TYPE_ERR; },
-      [](const TackyLabel&) { return AsmInstType::ASM_TYPE_ERR; },
+      [](const TackyJump&) { return (const Type*)nullptr; },
+      [](const TackyJumpIfZero&) { return (const Type*)nullptr; },
+      [](const TackyJumpIfNotZero&) { return (const Type*)nullptr; },
+      [](const TackyLabel&) { return (const Type*)nullptr; },
       [this](const TackyFunCall& call) { return get_type(call.dest); },
   };
 
@@ -77,9 +80,10 @@ AsmInstType AsmGen::get_type(std::shared_ptr<Tacky> inst) const {
 }
 
 AsmInstType AsmGen::type_to_asm_type(const Type* ty) const {
-  if (ty == BuiltInType::getInt32Ty()) {
+  if ((ty == BuiltInType::getInt32Ty()) || (ty == BuiltInType::getUInt32Ty())) {
     return AsmInstType::LONG;
-  } else if (ty == BuiltInType::getInt64Ty()) {
+  } else if ((ty == BuiltInType::getInt64Ty()) ||
+             (ty == BuiltInType::getUInt64Ty())) {
     return AsmInstType::QUAD;
   } else {
     return AsmInstType::ASM_TYPE_ERR;
@@ -257,6 +261,20 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       }
     }
 
+    std::shared_ptr<Asm> operator()(const AsmDiv& div) {
+      auto operand = fix_pseudo(div.operand.get());
+
+      if (std::holds_alternative<AsmImm>(*operand)) {
+        // movl $3, %r10d
+        // divl %r10d
+        auto reg = make_asm<AsmRegister>(div.type, AsmReg::R10);
+        add_inst<AsmMov>(instructions_, div.type, operand, reg);
+        return add_inst<AsmDiv>(instructions_, div.type, reg);
+      } else {
+        return add_inst<AsmDiv>(instructions_, div.type, operand);
+      }
+    }
+
     std::shared_ptr<Asm> operator()(const AsmCdq& cdq) {
       return add_inst<AsmCdq>(instructions_, cdq.type, cdq.dummy);
     }
@@ -285,7 +303,7 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       if ((mov.type == AsmInstType::LONG) && isLargerThanInt32(src)) {
         // Long value is greater than INT32_MAX, truncate first 4 bytes.
         auto val = std::get_if<AsmImm>(src.get());
-        int trunc = val->value & 0xFFFFFFFF;
+        uint32_t trunc = truncateInt64ToInt32(val->value);
         return add_inst<AsmMov>(instructions_, mov.type,
                                 make_asm<AsmImm>(trunc), dest);
       } else if (((mov.type == AsmInstType::QUAD) && isLargerThanInt32(src)) ||
@@ -321,6 +339,23 @@ std::shared_ptr<Asm> AsmGen::replace_pseudo_regs(Asm* prog) {
       }
 
       return add_inst<AsmMovsx>(instructions_, src, dest);
+    }
+
+    std::shared_ptr<Asm> operator()(const AsmMovZeroExtend& mov) {
+      auto src = fix_pseudo(mov.src.get());
+      auto dest = fix_pseudo(mov.dest.get());
+
+      if (auto reg = std::get_if<AsmRegister>(dest.get())) {
+        return add_inst<AsmMov>(instructions_, reg->type, src, dest);
+      } else if (isMemoryValue(dest)) {
+        add_inst<AsmMov>(instructions_, AsmInstType::LONG, src,
+                         make_asm<AsmRegister>(AsmInstType::LONG, AsmReg::R11));
+        return add_inst<AsmMov>(
+            instructions_, AsmInstType::QUAD,
+            make_asm<AsmRegister>(AsmInstType::QUAD, AsmReg::R11), dest);
+      }
+
+      return add_inst<AsmMovZeroExtend>(instructions_, src, dest);
     }
 
     std::shared_ptr<Asm> operator()(const AsmPush& push) {
@@ -415,7 +450,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
   // copy params to registers
   for (int i = 0; i < num_reg_params; ++i) {
     auto param = fn.params[i];
-    AsmInstType type = get_type(param);
+    const Type* ty = get_type(param);
+    AsmInstType type = type_to_asm_type(ty);
     auto reg = make_asm<AsmRegister>(type, arg_regs_[i]);
     add_inst<AsmMov>(instructions_, type, reg, gen(param.get()));
   }
@@ -426,7 +462,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
   for (int i = 0; i < num_stack_args; ++i) {
     int index = num_reg_params + i;
     auto param = fn.params[index];
-    add_inst<AsmMov>(instructions_, get_type(param),
+    const Type* ty = get_type(param);
+    add_inst<AsmMov>(instructions_, type_to_asm_type(ty),
                      make_asm<AsmStack>(param_stack_offset + 8 * i),
                      gen(param.get()));
   }
@@ -441,9 +478,12 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunction& fn) {
 
 std::shared_ptr<Asm> AsmGen::operator()(const TackyStaticVar& svar) {
   int alignment = 0;
-  if (svar.init.getType() == InitialValue::INITIAL_LONG_VALUE) {
+  int type = svar.init.getType();
+  if ((type == InitialValue::INITIAL_INT64_VALUE) ||
+      (type == InitialValue::INITIAL_UINT64_VALUE)) {
     alignment = 8;
-  } else if (svar.init.getType() == InitialValue::INITIAL_INT32_VALUE) {
+  } else if ((type == InitialValue::INITIAL_INT32_VALUE) ||
+             (type == InitialValue::INITIAL_UINT32_VALUE)) {
     alignment = 4;
   }
 
@@ -455,7 +495,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
   auto src1 = gen(bin.src1.get());
   auto src2 = gen(bin.src2.get());
   auto dest = gen(bin.dest.get());
-  AsmInstType type = get_type(bin.src1);
+  const Type* ty = get_type(bin.src1);
+  AsmInstType type = type_to_asm_type(ty);
 
   TokenType optype = bin.op.type;
   if (isRelationalOp(optype)) {
@@ -468,16 +509,16 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
         cc = AsmCondCode::NE;
         break;
       case TokenType::GREATER:
-        cc = AsmCondCode::G;
+        cc = ty->isSigned() ? AsmCondCode::G : AsmCondCode::A;
         break;
       case TokenType::GREATER_EQUAL:
-        cc = AsmCondCode::GE;
+        cc = ty->isSigned() ? AsmCondCode::GE : AsmCondCode::AE;
         break;
       case TokenType::LESS:
-        cc = AsmCondCode::L;
+        cc = ty->isSigned() ? AsmCondCode::L : AsmCondCode::B;
         break;
       case TokenType::LESS_EQUAL:
-        cc = AsmCondCode::LE;
+        cc = ty->isSigned() ? AsmCondCode::LE : AsmCondCode::BE;
         break;
       default:
         assert(0);
@@ -490,8 +531,7 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
     add_inst<AsmCmp>(instructions_, type, src2, src1);
     add_inst<AsmMov>(instructions_, type, make_asm<AsmImm>(0), dest);
     return add_inst<AsmSetCC>(instructions_, cc, dest);
-  } else if ((optype == TokenType::SLASH) ||
-      (optype == TokenType::PERCENT)) {
+  } else if ((optype == TokenType::SLASH) || (optype == TokenType::PERCENT)) {
     // division and remainder
     // Mov(src1, Reg(AX))
     // Cdq
@@ -500,8 +540,14 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyBinary& bin) {
     AsmReg reg = (optype == TokenType::SLASH) ? AsmReg::AX : AsmReg::DX;
     add_inst<AsmMov>(instructions_, type, src1,
                      make_asm<AsmRegister>(type, AsmReg::AX));
-    add_inst<AsmCdq>(instructions_, type, 0);
-    add_inst<AsmIdiv>(instructions_, type, src2);
+    if (ty->isSigned()) {
+      add_inst<AsmCdq>(instructions_, type, 0);
+      add_inst<AsmIdiv>(instructions_, type, src2);
+    } else {
+      add_inst<AsmMov>(instructions_, type, make_asm<AsmImm>(0),
+                       make_asm<AsmRegister>(type, AsmReg::DX));
+      add_inst<AsmDiv>(instructions_, type, src2);
+    }
     return add_inst<AsmMov>(instructions_, type,
                             make_asm<AsmRegister>(type, reg), dest);
   } else { // everything else
@@ -533,7 +579,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyUnary& unary) {
   // src and dest can only be constants or var
   auto src = gen(unary.src.get());
   auto dest = gen(unary.dest.get());
-  AsmInstType type = get_type(unary.src);
+  const Type* ty = get_type(unary.src);
+  AsmInstType type = type_to_asm_type(ty);
 
   if (unary.op.type == TokenType::BANG) {
     add_inst<AsmCmp>(instructions_, type, make_asm<AsmImm>(0), src);
@@ -563,7 +610,15 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyConstInt32& constant) {
   return make_asm<AsmImm>(constant.value);
 }
 
+std::shared_ptr<Asm> AsmGen::operator()(const TackyConstUInt32& constant) {
+  return make_asm<AsmImm>(constant.value);
+}
+
 std::shared_ptr<Asm> AsmGen::operator()(const TackyConstInt64& constant) {
+  return make_asm<AsmImm>(constant.value);
+}
+
+std::shared_ptr<Asm> AsmGen::operator()(const TackyConstUInt64& constant) {
   return make_asm<AsmImm>(constant.value);
 }
 
@@ -574,7 +629,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyVar& var) {
 std::shared_ptr<Asm> AsmGen::operator()(const TackyReturn& ret) {
   // tacky return can only be constants or var
   auto expr = gen(ret.value.get());
-  AsmInstType type = get_type(ret.value);
+  const Type* ty = get_type(ret.value);
+  AsmInstType type = type_to_asm_type(ty);
   add_inst<AsmMov>(instructions_, type, expr,
                    make_asm<AsmRegister>(type, AsmReg::AX));
   return add_inst<AsmReturn>(instructions_, 0);
@@ -593,10 +649,17 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackySignExtend& ext) {
   return add_inst<AsmMovsx>(instructions_, src, dest);
 }
 
+std::shared_ptr<Asm> AsmGen::operator()(const TackyZeroExtend& ext) {
+  auto src = gen(ext.src.get());
+  auto dest = gen(ext.dest.get());
+  return add_inst<AsmMovZeroExtend>(instructions_, src, dest);
+}
+
 std::shared_ptr<Asm> AsmGen::operator()(const TackyCopy& copy) {
   auto src = gen(copy.src.get());
   auto dest = gen(copy.dest.get());
-  return add_inst<AsmMov>(instructions_, get_type(copy.src), src, dest);
+  const Type* ty = get_type(copy.src);
+  return add_inst<AsmMov>(instructions_, type_to_asm_type(ty), src, dest);
 }
 
 std::shared_ptr<Asm> AsmGen::get_label(std::shared_ptr<Tacky> inst) {
@@ -616,7 +679,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyJump& jmp) {
 std::shared_ptr<Asm> AsmGen::operator()(const TackyJumpIfZero& jmp) {
   auto cond = gen(jmp.condition.get());
   auto target = get_label(jmp.target);
-  AsmInstType type = get_type(jmp.condition);
+  const Type* ty = get_type(jmp.condition);
+  AsmInstType type = type_to_asm_type(ty);
   add_inst<AsmCmp>(instructions_, type, make_asm<AsmImm>(0), cond);
   return add_inst<AsmJmpCC>(instructions_, AsmCondCode::E, target);
 }
@@ -624,7 +688,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyJumpIfZero& jmp) {
 std::shared_ptr<Asm> AsmGen::operator()(const TackyJumpIfNotZero& jmp) {
   auto cond = gen(jmp.condition.get());
   auto target = get_label(jmp.target);
-  AsmInstType type = get_type(jmp.condition);
+  const Type* ty = get_type(jmp.condition);
+  AsmInstType type = type_to_asm_type(ty);
   add_inst<AsmCmp>(instructions_, type, make_asm<AsmImm>(0), cond);
   return add_inst<AsmJmpCC>(instructions_, AsmCondCode::NE, target);
 }
@@ -652,10 +717,11 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunCall& call) {
   // pass arguments in registers
   for (int i = 0; i < num_reg_args; ++i) {
     auto arg = call.args[i];
-    AsmInstType type = get_type(arg);
+    const Type* ty = get_type(arg);
+    AsmInstType type = type_to_asm_type(ty);
     auto reg = make_asm<AsmRegister>(type, arg_regs_[i]);
     auto res = gen(arg.get());
-    add_inst<AsmMov>(instructions_, get_type(arg), res, reg);
+    add_inst<AsmMov>(instructions_, type, res, reg);
   }
 
   // pass arguments on stack
@@ -663,9 +729,10 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunCall& call) {
     int index = total_args - i - 1;
     auto arg = call.args[index];
     auto res = gen(arg.get());
+    const Type* ty = get_type(arg);
     if (std::get_if<AsmImm>(res.get()) ||
         std::get_if<AsmRegister>(res.get()) ||
-        (get_type(arg) == AsmInstType::QUAD)) {
+        (type_to_asm_type(ty) == AsmInstType::QUAD)) {
       add_inst<AsmPush>(instructions_, res);
     } else {
       auto reg = make_asm<AsmRegister>(AsmInstType::LONG, AX);
@@ -690,7 +757,8 @@ std::shared_ptr<Asm> AsmGen::operator()(const TackyFunCall& call) {
   }
 
   // retrieve return value
-  AsmInstType return_type = get_type(call.dest);
+  const Type* ty = get_type(call.dest);
+  AsmInstType return_type = type_to_asm_type(ty);
   auto dest = gen(call.dest.get());
   auto return_reg = make_asm<AsmRegister>(return_type, AsmReg::AX);
   add_inst<AsmMov>(instructions_, return_type, return_reg, dest);

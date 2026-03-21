@@ -30,8 +30,10 @@ std::shared_ptr<Tacky> TackyGen::gen() {
     const SymbolAttrs* attrs = sym->getAttrs();
     if (attrs->getAttributeType() == SymbolAttrs::STATIC_ATTR) {
       const InitialValue& initValue = attrs->getInitValue();
-      if (initValue.getType() == InitialValue::INITIAL_INT32_VALUE ||
-          initValue.getType() == InitialValue::INITIAL_LONG_VALUE) {
+      if ((initValue.getType() == InitialValue::INITIAL_INT32_VALUE) ||
+          (initValue.getType() == InitialValue::INITIAL_UINT32_VALUE) ||
+          (initValue.getType() == InitialValue::INITIAL_INT64_VALUE) ||
+          (initValue.getType() == InitialValue::INITIAL_UINT64_VALUE)) {
         defs.emplace_back(make_tacky<TackyStaticVar>(
             attrs->isGlobal(), sym->getName(), initValue));
       } else if (initValue.getType() == InitialValue::TENTATIVE_VALUE) {
@@ -433,8 +435,16 @@ std::shared_ptr<Tacky> TackyGen::operator()(const Int32Exp& num) {
   return make_tacky<TackyConstInt32>(num.int32);
 }
 
+std::shared_ptr<Tacky> TackyGen::operator()(const UInt32Exp& num) {
+  return make_tacky<TackyConstUInt32>(num.uint32);
+}
+
 std::shared_ptr<Tacky> TackyGen::operator()(const Int64Exp& num) {
   return make_tacky<TackyConstInt64>(num.int64);
+}
+
+std::shared_ptr<Tacky> TackyGen::operator()(const UInt64Exp& num) {
+  return make_tacky<TackyConstUInt64>(num.uint64);
 }
 
 std::shared_ptr<Tacky> TackyGen::operator()(const StringExp&) {
@@ -445,17 +455,20 @@ std::shared_ptr<Tacky> TackyGen::operator()(const CastExpr& cexpr) {
   auto val = gen(cexpr.expr.get());
   // no promotion required
   const Type* ty = cexpr.evalty;
-  if (ty == cexpr.exprty) {
+  const Type* ety = cexpr.exprty;
+  if (ty == ety) {
     return val;
   }
 
   auto dst = make_tacky_var(ty);
-  if (ty == BuiltInType::getInt64Ty()) {
-    instructions_.emplace_back(
-      make_tacky<TackySignExtend>(val, dst));
+  if (ty->getSize() == ety->getSize()) {
+    instructions_.emplace_back(make_tacky<TackyCopy>(val, dst));
+  } else if (ty->getSize() < ety->getSize()) {
+    instructions_.emplace_back(make_tacky<TackyTruncate>(val, dst));
+  } else if (ety->isSigned()) {
+    instructions_.emplace_back(make_tacky<TackySignExtend>(val, dst));
   } else {
-    instructions_.emplace_back(
-      make_tacky<TackyTruncate>(val, dst));
+    instructions_.emplace_back(make_tacky<TackyZeroExtend>(val, dst));
   }
 
   return dst;

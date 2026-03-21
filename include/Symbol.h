@@ -13,21 +13,23 @@ class Type;
 struct InitialValue {
   static const int TENTATIVE_VALUE = 0;
   static const int INITIAL_INT32_VALUE = 1;
-  static const int INITIAL_LONG_VALUE = 2;
-  static const int NOINIT_VALUE = 3;
+  static const int INITIAL_UINT32_VALUE = 2;
+  static const int INITIAL_INT64_VALUE = 3;
+  static const int INITIAL_UINT64_VALUE = 4;
+  static const int NOINIT_VALUE = 5;
 
   InitialValue() :
     type_(NOINIT_VALUE), value_(0) {}
 
-  InitialValue(int type, long value=0) :
+  InitialValue(int type, uint64_t value=0) :
     type_(type), value_(value) {}
 
   int getType() const { return type_; }
-  long getValue() const { return value_; }
+  uint64_t getValue() const { return value_; }
 
 private:
   int type_;
-  long value_;
+  uint64_t value_;
 };
 
 struct SymbolAttrs {

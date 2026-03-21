@@ -36,7 +36,8 @@ std::string Codegen::toInst(AsmInst op, AsmInstType type) const {
     {AsmInst::NOT, "not"},
     {AsmInst::CALL, "call"},
     {AsmInst::CMP, "cmp"},
-    {AsmInst::DIV, "idiv"},
+    {AsmInst::IDIV, "idiv"},
+    {AsmInst::DIV, "div"},
     {AsmInst::MOV, "mov"},
   };
 
@@ -111,16 +112,17 @@ std::string Codegen::operator()(const AsmStaticVar& svar) {
     ss << "  .globl " << name << '\n';
   }
   
+  int type = svar.init.getType();
   if (svar.init.getValue() != 0) {
     ss << "  .data\n";
     ss << "  .align " << svar.alignment << '\n';
     ss << name << ":\n";
 
-    if (svar.init.getType() == InitialValue::INITIAL_INT32_VALUE) {
+    if ((type == InitialValue::INITIAL_INT32_VALUE) ||
+        (type == InitialValue::INITIAL_UINT32_VALUE)) {
       ss << "  .long ";
     } else {
-      assert(svar.init.getType() == InitialValue::INITIAL_LONG_VALUE);
-      ss << "  .quad "; 
+      ss << "  .quad ";
     }
 
     ss << svar.init.getValue() << '\n';
@@ -130,7 +132,8 @@ std::string Codegen::operator()(const AsmStaticVar& svar) {
     ss << name << ":\n";
 
     ss << "  .zero";
-    if (svar.init.getType() == InitialValue::INITIAL_INT32_VALUE) {
+    if ((type == InitialValue::INITIAL_INT32_VALUE) ||
+        (type == InitialValue::INITIAL_UINT32_VALUE)) {
       ss << "  4\n";
     } else {
       ss << "  8\n";
@@ -161,6 +164,12 @@ std::string Codegen::operator()(const AsmCmp& cmp) {
 }
 
 std::string Codegen::operator()(const AsmIdiv& idiv) {
+  auto operand = code(idiv.operand);
+  std::string inst = toInst(AsmInst::IDIV, idiv.type);
+  return std::format("{} {}", inst, operand);
+}
+
+std::string Codegen::operator()(const AsmDiv& idiv) {
   auto operand = code(idiv.operand);
   std::string inst = toInst(AsmInst::DIV, idiv.type);
   return std::format("{} {}", inst, operand);
@@ -199,7 +208,11 @@ std::string Codegen::operator()(const AsmSetCC& setcc) {
      {AsmCondCode::L, "setl"},
      {AsmCondCode::LE, "setle"},
      {AsmCondCode::G, "setg"},
-     {AsmCondCode::GE, "setge"}};
+     {AsmCondCode::GE, "setge"},
+     {AsmCondCode::A, "seta"},
+     {AsmCondCode::AE, "setae"},
+     {AsmCondCode::B, "setb"},
+     {AsmCondCode::BE, "setbe"}};
 
   auto operand = code(setcc.operand);
   auto it = code_to_inst.find(setcc.cond_code);
@@ -226,6 +239,10 @@ std::string Codegen::operator()(const AsmMovsx& mov) {
   auto src = code(mov.src);
   auto dest = code(mov.dest);
   return std::format("movslq {}, {}", src, dest);
+}
+
+std::string Codegen::operator()(const AsmMovZeroExtend&) {
+  assert(0);
 }
 
 std::string Codegen::operator()(const AsmPush& push) {

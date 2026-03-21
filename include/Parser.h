@@ -65,12 +65,15 @@ private:
   std::vector<Token> parseQualifiers();
   bool isDeclarationFirstSet() const;
   bool isTypeQualifier(const Token& tok) const;
-  Token getType(const std::vector<Token>& qualifiers) const;
+  std::vector<Token> getType(const std::vector<Token>& qualifiers) const;
   Scope::StorageClass getStorageClass(
     const std::vector<Token>& qualifiers) const;
   Scope::StorageClass getStorageClass(
     bool isFunction, const std::vector<Token>& qualifiers) const;
   long parseLong(const Token& tok, bool isLongLiteral);
+  uint64_t parseUnsignedLong(const Token &tok, bool &fitsInUInt32,
+                             bool parseUInt = false);
+  uint32_t parseUnsignedInt(const Token &tok);
   bool parseInt32OrLong(const Token& tok, int& int32, long& int64);
 
   size_t current;

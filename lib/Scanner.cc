@@ -10,6 +10,8 @@ Scanner::Scanner(const std::string &aSource, ErrorHandler &aErrorHandler)
   reservedKeywords = {
     {"int", TokenType::INT},
     {"long", TokenType::LONG},
+    {"signed", TokenType::SIGNED},
+    {"unsigned", TokenType::UNSIGNED},
     {"void", TokenType::VOID},
     {"return", TokenType::RETURN},
     {"else", TokenType::ELSE},
@@ -179,16 +181,29 @@ void Scanner::number() {
   while (isDigit(peek()))
     (void)advanceAndGetChar();
 
-  // long numbers can have an [lL] at the end.
-  if (((peek() == 'l') || (peek() == 'L')) && !isAlpha(peekNext())) {
+  if ((peek() == 'u') || (peek() == 'U')) {
     (void)advanceAndGetChar();
+
+    if ((peek() == 'l') || (peek() == 'L')) {
+      // unsigned long int with [uU][lL] suffix.
+      (void)advanceAndGetChar();
+    }
+  } else if ((peek() == 'l') || (peek() == 'L')) {
+    (void)advanceAndGetChar();
+
+    if ((peek() == 'u') || (peek() == 'U')) {
+      // unsigned long int with [lL][uU] suffix.
+      (void)advanceAndGetChar();
+    }
   } else if (peek() == '.' && isDigit(peekNext())) {
     // look for fractional part
     // consume the "."
     (void)advanceAndGetChar();
     while (isDigit(peek()))
       (void)advanceAndGetChar();
-  } else if (isAlpha(peek())) {
+  }
+
+  if (isAlpha(peek())) {
     // malformed number.
     const size_t numberLength = current - start;
     std::string errorMessage = "Malformed number: ";
@@ -197,6 +212,7 @@ void Scanner::number() {
     errorHandler.add(line, "", errorMessage);
     return;
   }
+
   const size_t numberLength = current - start;
   const std::string numberLiteral = source.substr(start, numberLength);
   addToken(TokenType::NUMBER, numberLiteral);

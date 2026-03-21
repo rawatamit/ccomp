@@ -8,8 +8,16 @@ using namespace ccomp;
 static const Type* sGetCommonType(const Type* a, const Type* b) {
   if (a == b) {
     return a;
+  } else if (a->getSize() == b->getSize()) {
+    if (a->isSigned()) {
+      return b;
+    } else {
+      return a;
+    }
+  } else if (a->getSize() > b->getSize()) {
+    return a;
   } else {
-    return BuiltInType::getInt64Ty();
+    return b;
   }
 }
 
@@ -18,9 +26,10 @@ static std::unique_ptr<Expr> sConvertTo(std::unique_ptr<Expr> expr, const Type* 
     return expr;
   } else {
     // FIXME!!!
-    auto ret = std::make_unique<Expr>(CastExpr(Token(TokenType::ERROR, "lexeme", "lit", 0), std::move(expr)));
+    auto ret = std::make_unique<Expr>(CastExpr({Token(TokenType::ERROR, "lexeme", "lit", 0)}, std::move(expr)));
     auto cexpr = std::get_if<CastExpr>(ret.get());
     cexpr->evalty = promoteTy;
+    cexpr->exprty = origTy;
     return ret;
   }
 }
@@ -43,6 +52,27 @@ const Type* TypeResolver::typecheck(Expr* expr) {
 
 const Type* TypeResolver::typecheck(Stmt* stmt) {
   return std::visit(*this, *stmt);
+}
+
+uint64_t TypeResolver::getIntValue(const Expr* expr, bool& isConstant) const {
+  // Return an integer constant value given an expression. Parser will create
+  // the smallest type that fits a constant. When typechecking say static
+  // definitions, the type of the static may be different from the constant that
+  // what was parsed. Return the largest type which can fit all possible values
+  // of an integer constant.
+  isConstant = true;
+  if (auto constval = std::get_if<Int32Exp>(expr)) {
+    return constval->int32;
+  } else if (auto constval = std::get_if<UInt32Exp>(expr)) {
+    return constval->uint32;
+  } else if (auto constval = std::get_if<Int64Exp>(expr)) {
+    return constval->int64;
+  } else if (auto constval = std::get_if<UInt64Exp>(expr)) {
+    return constval->uint64;
+  }
+
+  isConstant = false;
+  return 0;
 }
 
 void TypeResolver::add(const std::string& name, std::shared_ptr<Symbol> sym,
@@ -80,7 +110,7 @@ const Type* TypeResolver::operator()(Function& fn) {
   bool isGlobal = (fn.storage != Scope::STORAGE_STATIC);
   bool alreadyDefined = false;
   const Type* fnty =
-    new FunctionType(FunctionType(getTypeFromToken(fn.returnty), paramTypes));
+    new FunctionType(FunctionType(getTypeFromTokens(fn.returnty), paramTypes));
 
   auto oldDecl = symtab_.find(fnstr);
   if (oldDecl != symtab_.end()) {
@@ -127,7 +157,7 @@ const Type* TypeResolver::operator()(Function& fn) {
 }
 
 const Type* TypeResolver::operator()(FunctionParam& param) {
-  const Type* ty = getTypeFromToken(param.type);
+  const Type* ty = getTypeFromTokens(param.type);
   param.sym->setType(ty);
   return ty;
 }
@@ -135,7 +165,9 @@ const Type* TypeResolver::operator()(FunctionParam& param) {
 const Type* TypeResolver::operator()(const If& ifstmt) {
   auto condty = typecheck(ifstmt.condition.get());
   if ((condty != BuiltInType::getInt32Ty()) &&
-      (condty != BuiltInType::getInt64Ty())) {
+      (condty != BuiltInType::getUInt32Ty()) &&
+      (condty != BuiltInType::getInt64Ty()) &&
+      (condty != BuiltInType::getUInt64Ty())) {
     errorHandler_.add(0,
                       " condition in if",
                       "Integer type expected.");
@@ -194,18 +226,27 @@ const Type* TypeResolver::operator()(const For& loop) {
 const Type* TypeResolver::typecheckFileScopeDecl(Decl& decl) {
   const Variable* var = std::get_if<Variable>(decl.name.get());
   const std::string& declstr = var->sym->getName();
-  const Type* ty = getTypeFromToken(decl.type);
+  const Type* ty = getTypeFromTokens(decl.type);
   InitialValue initValue;
 
   if (auto& init = decl.init) {
-    if (auto constval = std::get_if<Int32Exp>(init.get())) {
-      initValue = InitialValue(InitialValue::INITIAL_INT32_VALUE, constval->int32);
-    } else if (auto constval = std::get_if<Int64Exp>(init.get())) {
-      initValue = InitialValue(InitialValue::INITIAL_LONG_VALUE, constval->int64);
-    } else {
+    bool isConstant = false;
+    uint64_t value = getIntValue(init.get(), isConstant);
+    if (!isConstant) {
       errorHandler_.add(0,
                         " at declaration",
                         "Non-const initializer.");
+    } else if (ty == BuiltInType::getInt32Ty()) {
+      initValue = InitialValue(InitialValue::INITIAL_INT32_VALUE,
+                               truncateInt64ToInt32(value));
+    } else if (ty == BuiltInType::getUInt32Ty()) {
+      initValue = InitialValue(InitialValue::INITIAL_UINT32_VALUE,
+                               truncateInt64ToInt32(value));
+    } else if (ty == BuiltInType::getInt64Ty()) {
+      initValue = InitialValue(InitialValue::INITIAL_INT64_VALUE, value);
+    } else if (ty == BuiltInType::getUInt64Ty()) {
+      initValue = InitialValue(InitialValue::INITIAL_UINT64_VALUE, value);
+    } else {
     }
   } else {
     if (decl.storage == Scope::STORAGE_EXTERN) {
@@ -244,18 +285,18 @@ const Type* TypeResolver::typecheckFileScopeDecl(Decl& decl) {
     }
 
     InitialValue oldInitValue = oldDecl->second->getAttrs()->getInitValue();
-    if (oldInitValue.getType() == InitialValue::INITIAL_INT32_VALUE ||
-        oldInitValue.getType() == InitialValue::INITIAL_LONG_VALUE) {
-      if (initValue.getType() == InitialValue::INITIAL_INT32_VALUE ||
-          initValue.getType() == InitialValue::INITIAL_LONG_VALUE) {
+    if ((oldInitValue.getType() != InitialValue::NOINIT_VALUE) &&
+        (oldInitValue.getType() != InitialValue::TENTATIVE_VALUE)) {
+      if ((initValue.getType() != InitialValue::NOINIT_VALUE) &&
+          (initValue.getType() != InitialValue::TENTATIVE_VALUE)) {
         errorHandler_.add(0,
                           " declaration " + declstr,
                           "Conflicting file scope variable definitions.");
       } else {
         initValue = oldInitValue;
       }
-    } else if (((initValue.getType() != InitialValue::INITIAL_INT32_VALUE) &&
-                (initValue.getType() != InitialValue::INITIAL_LONG_VALUE)) &&
+    } else if (((initValue.getType() == InitialValue::NOINIT_VALUE) ||
+                (initValue.getType() == InitialValue::TENTATIVE_VALUE)) &&
                (oldInitValue.getType() == InitialValue::TENTATIVE_VALUE)) {
       initValue = InitialValue(InitialValue::TENTATIVE_VALUE);
     }
@@ -269,7 +310,7 @@ const Type* TypeResolver::typecheckFileScopeDecl(Decl& decl) {
 const Type* TypeResolver::typecheckLocalDecl(Decl& decl) {
   const Variable* var = std::get_if<Variable>(decl.name.get());
   const std::string& declstr = var->sym->getName();
-  const Type* ty = getTypeFromToken(decl.type);
+  const Type* ty = getTypeFromTokens(decl.type);
 
   if (decl.storage == Scope::STORAGE_EXTERN) {
     if (decl.init) {
@@ -310,7 +351,7 @@ const Type* TypeResolver::typecheckLocalDecl(Decl& decl) {
     } else if (auto constval = std::get_if<Int32Exp>(decl.init.get())) {
       initValue = InitialValue(InitialValue::INITIAL_INT32_VALUE, constval->int32);
     } else if (auto constval = std::get_if<Int64Exp>(decl.init.get())) {
-      initValue = InitialValue(InitialValue::INITIAL_LONG_VALUE, constval->int64);
+      initValue = InitialValue(InitialValue::INITIAL_INT64_VALUE, constval->int64);
     } else {
       errorHandler_.add(0,
                         " at declaration",
@@ -408,8 +449,16 @@ const Type* TypeResolver::operator()(Int32Exp& int32) {
   return int32.evalty = BuiltInType::getInt32Ty();
 }
 
+const Type* TypeResolver::operator()(UInt32Exp& uint32) {
+  return uint32.evalty = BuiltInType::getUInt32Ty();
+}
+
 const Type* TypeResolver::operator()(Int64Exp& int64) {
   return int64.evalty = BuiltInType::getInt64Ty();
+}
+
+const Type* TypeResolver::operator()(UInt64Exp& uint64) {
+  return uint64.evalty = BuiltInType::getUInt64Ty();
 }
 
 const Type* TypeResolver::operator()(const StringExp&) {
@@ -418,7 +467,7 @@ const Type* TypeResolver::operator()(const StringExp&) {
  
 const Type* TypeResolver::operator()(CastExpr& cast) {
   cast.exprty = typecheck(cast.expr.get());
-  cast.evalty = getTypeFromToken(cast.type);
+  cast.evalty = getTypeFromTokens(cast.type);
   return cast.evalty;
 }
 

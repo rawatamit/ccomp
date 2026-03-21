@@ -22,6 +22,7 @@ private:
   const Type* typecheckFileScopeDecl(Decl& decl);
   const Type* typecheckLocalDecl(Decl& decl);
 
+  uint64_t getIntValue(const Expr* expr, bool& isConstant) const;
   void add(const std::string& name, std::shared_ptr<Symbol> sym, const Type* ty,
            std::unique_ptr<SymbolAttrs> attrs);
 
@@ -43,7 +44,9 @@ public:
   const Type* operator()(Conditional& expr);
   const Type* operator()(BinaryExpr& expr);
   const Type* operator()(Int32Exp& expr);
+  const Type* operator()(UInt32Exp& expr);
   const Type* operator()(Int64Exp& expr);
+  const Type* operator()(UInt64Exp& expr);
   const Type* operator()(const StringExp& expr);
   const Type* operator()(CastExpr& expr);
   const Type* operator()(UnaryExpr& expr);

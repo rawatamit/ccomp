@@ -43,21 +43,21 @@ public:
 
 class FunctionParam {
 public: 
-  FunctionParam(Token type, Token name) :
-    type(type), name(name) {}
+  FunctionParam(std::vector<Token> type, Token name) :
+    type(std::move(type)), name(name) {}
 public: 
-  Token type;
+  std::vector<Token> type;
   Token name;
   std::shared_ptr<Symbol> sym;
 };
 
 class Function {
 public: 
-  Function(bool fileScope, Token returnty, Scope::StorageClass storage, Token name, std::vector<std::unique_ptr<Stmt>> params, std::unique_ptr<Stmt> body) :
-    fileScope(fileScope), returnty(returnty), storage(storage), name(name), params(std::move(params)), body(std::move(body)) {}
+  Function(bool fileScope, std::vector<Token> returnty, Scope::StorageClass storage, Token name, std::vector<std::unique_ptr<Stmt>> params, std::unique_ptr<Stmt> body) :
+    fileScope(fileScope), returnty(std::move(returnty)), storage(storage), name(name), params(std::move(params)), body(std::move(body)) {}
 public: 
   bool fileScope;
-  Token returnty;
+  std::vector<Token> returnty;
   Scope::StorageClass storage;
   Token name;
   std::vector<std::unique_ptr<Stmt>> params;
@@ -119,12 +119,12 @@ public:
 
 class Decl {
 public: 
-  Decl(bool fileScope, bool loopDecl, Token type, Scope::StorageClass storage, std::unique_ptr<Expr> name, std::unique_ptr<Expr> init) :
-    fileScope(fileScope), loopDecl(loopDecl), type(type), storage(storage), name(std::move(name)), init(std::move(init)) {}
+  Decl(bool fileScope, bool loopDecl, std::vector<Token> type, Scope::StorageClass storage, std::unique_ptr<Expr> name, std::unique_ptr<Expr> init) :
+    fileScope(fileScope), loopDecl(loopDecl), type(std::move(type)), storage(storage), name(std::move(name)), init(std::move(init)) {}
 public: 
   bool fileScope;
   bool loopDecl;
-  Token type;
+  std::vector<Token> type;
   Scope::StorageClass storage;
   std::unique_ptr<Expr> name;
   std::unique_ptr<Expr> init;

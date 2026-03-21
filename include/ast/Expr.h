@@ -3,6 +3,7 @@
 
 #include "Token.h"
 #include "Scope.h"
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,14 +15,16 @@ class Assign;
 class Conditional;
 class BinaryExpr;
 class Int32Exp;
+class UInt32Exp;
 class Int64Exp;
+class UInt64Exp;
 class StringExp;
 class CastExpr;
 class UnaryExpr;
 class Variable;
 class Call;
 typedef const Type* type_ptr;
-using Expr = std::variant<Assign, Conditional, BinaryExpr, Int32Exp, Int64Exp, StringExp, CastExpr, UnaryExpr, Variable, Call>;
+using Expr = std::variant<Assign, Conditional, BinaryExpr, Int32Exp, UInt32Exp, Int64Exp, UInt64Exp, StringExp, CastExpr, UnaryExpr, Variable, Call>;
 class Assign {
 public: 
   Assign(std::unique_ptr<Expr> lvalue, std::unique_ptr<Expr> value) :
@@ -56,21 +59,41 @@ public:
 
 class Int32Exp {
 public: 
-  Int32Exp(Token tok, int int32) :
+  Int32Exp(Token tok, int32_t int32) :
     tok(tok), int32(int32) {}
 public: 
   Token tok;
-  int int32;
+  int32_t int32;
+  type_ptr evalty=0;
+};
+
+class UInt32Exp {
+public: 
+  UInt32Exp(Token tok, uint32_t uint32) :
+    tok(tok), uint32(uint32) {}
+public: 
+  Token tok;
+  uint32_t uint32;
   type_ptr evalty=0;
 };
 
 class Int64Exp {
 public: 
-  Int64Exp(Token tok, long int64) :
+  Int64Exp(Token tok, int64_t int64) :
     tok(tok), int64(int64) {}
 public: 
   Token tok;
-  long int64;
+  int64_t int64;
+  type_ptr evalty=0;
+};
+
+class UInt64Exp {
+public: 
+  UInt64Exp(Token tok, uint64_t uint64) :
+    tok(tok), uint64(uint64) {}
+public: 
+  Token tok;
+  uint64_t uint64;
   type_ptr evalty=0;
 };
 
@@ -86,10 +109,10 @@ public:
 
 class CastExpr {
 public: 
-  CastExpr(Token type, std::unique_ptr<Expr> expr) :
-    type(type), expr(std::move(expr)) {}
+  CastExpr(std::vector<Token> type, std::unique_ptr<Expr> expr) :
+    type(std::move(type)), expr(std::move(expr)) {}
 public: 
-  Token type;
+  std::vector<Token> type;
   std::unique_ptr<Expr> expr;
   type_ptr evalty=0;
   type_ptr exprty=0;

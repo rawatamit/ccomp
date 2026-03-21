@@ -37,7 +37,7 @@ void Resolver::resolveFunction(Function& fn,
   FunctionType enclosingFn = currentFunction_;
   const Type* enclosingRetTy = currentFunctionReturnTy_;
   currentFunction_ = type;
-  currentFunctionReturnTy_ = getTypeFromToken(fn.returnty);
+  currentFunctionReturnTy_ = getTypeFromTokens(fn.returnty);
   beginScope();
   for (auto& param : fn.params) {
     resolve(param.get());
@@ -321,7 +321,13 @@ void Resolver::operator()(const BinaryExpr& binexpr) {
 void Resolver::operator()(const Int32Exp&) {
 }
 
+void Resolver::operator()(const UInt32Exp&) {
+}
+
 void Resolver::operator()(const Int64Exp&) {
+}
+
+void Resolver::operator()(const UInt64Exp&) {
 }
 
 void Resolver::operator()(const StringExp&) {

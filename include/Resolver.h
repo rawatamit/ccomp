@@ -68,7 +68,9 @@ public:
   void operator()(const Conditional& expr);
   void operator()(const BinaryExpr& expr);
   void operator()(const Int32Exp& expr);
+  void operator()(const UInt32Exp& expr);
   void operator()(const Int64Exp& expr);
+  void operator()(const UInt64Exp& expr);
   void operator()(const StringExp& expr);
   void operator()(const CastExpr& expr);
   void operator()(const UnaryExpr& expr);

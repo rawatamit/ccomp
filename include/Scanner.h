@@ -1,11 +1,10 @@
 #ifndef SCANNER_HPP
 #define SCANNER_HPP
 
+#include "Token.h"
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include "Token.h"
 
 namespace ccomp {
 // forward declarations

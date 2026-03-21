@@ -27,7 +27,7 @@ private:
   std::shared_ptr<Asm> gen(Tacky* expr);
   std::vector<std::shared_ptr<Asm>> gen(const std::vector<std::shared_ptr<Tacky>>& exprs);
   std::shared_ptr<Asm> get_label(std::shared_ptr<Tacky> inst);
-  AsmInstType get_type(std::shared_ptr<Tacky> inst) const;
+  const Type* get_type(std::shared_ptr<Tacky> inst) const;
   AsmInstType type_to_asm_type(const Type* ty) const;
 
   // returns the size in bytes of stack space needed for function
@@ -40,11 +40,14 @@ public:
   std::shared_ptr<Asm> operator()(const TackyUnary& Tacky);
   std::shared_ptr<Asm> operator()(const TackyBinary& Tacky);
   std::shared_ptr<Asm> operator()(const TackyConstInt32& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyConstUInt32& Tacky);
   std::shared_ptr<Asm> operator()(const TackyConstInt64& Tacky);
+  std::shared_ptr<Asm> operator()(const TackyConstUInt64& Tacky);
   std::shared_ptr<Asm> operator()(const TackyVar& Tacky);
   std::shared_ptr<Asm> operator()(const TackyReturn& Tacky);
   std::shared_ptr<Asm> operator()(const TackyTruncate&);
   std::shared_ptr<Asm> operator()(const TackySignExtend&);
+  std::shared_ptr<Asm> operator()(const TackyZeroExtend&);
   std::shared_ptr<Asm> operator()(const TackyCopy& copy);
   std::shared_ptr<Asm> operator()(const TackyJump& jmp);
   std::shared_ptr<Asm> operator()(const TackyJumpIfZero& jmp);
